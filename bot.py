@@ -1,41 +1,35 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
-from discord.ext import tasks
-from discord.ui import View
+import discord # type: ignore
+from discord import app_commands # type: ignore
+from discord.ext import commands # type: ignore
+from discord.ext import tasks # type: ignore
+from discord.ui import View # type: ignore
 import math
 import random
 import json
 import os
-from pokemon import generate_pokemon
+from pokemon import generate_pokemon # type: ignore
 import asyncio
 import datetime
 import time
 from itertools import combinations
 from itertools import permutations
-from trueskill import Rating, quality_1vs1, rate_1vs1
+from trueskill import Rating, quality_1vs1, rate_1vs1 # type: ignore
 import traceback
 from bottokens import tokens # type: ignore
-from discord import FFmpegPCMAudio
+from discord import FFmpegPCMAudio # type: ignore
 from PIL import Image, ImageDraw, ImageFont # type: ignore
 import io
 
+# cd C:\Users\hello\Desktop\Python\DiscordRankBot
+# cd C:\Users\zingt\OneDrive\Desktop\Python\DiscordRankBot
+# python bot.py
+
+# intents = discord.Intents.default()
+# client = discord.Client(intents=intents)
+# tree = app_commands.CommandTree(client)
+
 BOT_TOKEN = tokens.EIHR_token
 
-# Current Rank Emoji
-emoji_1 = "<:Bronze:1056655601087828080>"
-emoji_2 = "<:Silver:1056655619807006740>"
-emoji_3 = "<:Gold:1056655634633867335>"
-emoji_4 = "<:Platinum:1056655649922105374>"
-emoji_5 = "<:Diamond:1056655665361334372>"
-emoji_6 = "<:Master:1056655689155625140>"
-
-# emoji_1 = "🟫"
-# emoji_2 = "⬜"
-# emoji_3 = "🟨"
-# emoji_4 = "🟩"
-# emoji_5 = "🟦"
-# emoji_6 = "🟥"
 
 
 def elo_probability(rating1, rating2):
@@ -51,9 +45,78 @@ def elo_rating(rankA, rankB, Konstant):
     return(rankW, rankL) # Return the CHANGE in rank for winners and losers
 
 
-rankscaling = 1.00173 # µ
-async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION 2.14.2 Added match history, peak zsr, elo, ts ~ fixed |*~ formatting #
+def loaddatabase(interaction):
+    if interaction.channel.category:
+        categoryid = interaction.channel.category.id
+        databasestring = "cat" + str(categoryid) + ".json"
+        if os.path.isfile(databasestring):
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
+            return database
 
+    guildid = str(interaction.guild.id)
+    databasestring = guildid + ".json"
+    if os.path.isfile(databasestring):
+        with open(databasestring, 'r') as openfile:
+            database = json.load(openfile)
+        return database
+
+    return None
+
+
+def getdatabasestring(interaction):
+    if interaction.channel.category:
+        categoryid = interaction.channel.category.id
+        databasestring = "cat" + str(categoryid) + ".json"
+        if os.path.isfile(databasestring):
+            return databasestring
+
+    guildid = str(interaction.guild.id)
+    databasestring = guildid + ".json"
+    if os.path.isfile(databasestring):
+        return databasestring
+
+    return None
+
+
+def loadundodatabase(interaction):
+    if interaction.channel.category:
+        categoryid = interaction.channel.category.id
+        undostring = "cat" + str(categoryid) + "undo.json"
+        if os.path.isfile(undostring):
+            with open(undostring, 'r') as openfile:
+                database = json.load(openfile)
+            return database
+
+    guildid = str(interaction.guild.id)
+    databasestring = guildid + ".json"
+    undostring = str(interaction.guild.id) + "undo.json"
+    if os.path.isfile(databasestring):
+        with open(databasestring, 'r') as openfile:
+            database = json.load(openfile)
+        return database
+
+    return None
+
+
+def getundostring(interaction):
+    if interaction.channel.category:
+        categoryid = interaction.channel.category.id
+        undostring = "cat" + str(categoryid) + "undo.json"
+        if os.path.isfile(undostring):
+            return undostring
+
+    guildid = str(interaction.guild.id)
+    databasestring = guildid + ".json"
+    undostring = str(interaction.guild.id) + "undo.json"
+    if os.path.isfile(databasestring):
+        return undostring
+
+    return None
+
+
+rankscaling = 1.00173 # µ
+async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION 2.16 fixing start of history #
     botuser = context.guild.me
 
     bigstring = ""
@@ -170,28 +233,20 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
         tempmmr = database[x][sortstring]
         storage[x] = [tempmmr, "name", database[x]["uncertainty"]]    # Recording the change in MMR and Uncertainty for later
 
+        trueskilldelta = database[x]["TrueSkillMu"] - 3 * database[x]["TrueSkillSigma"]
+        if "zsrhistory" not in database[x]:
+            database[x]["zsrhistory"] = []
+            database[x]["zsrhistory"].append(database[x]["mmr"])
+        if "elohistory" not in database[x]:
+            database[x]["elohistory"] = []
+            database[x]["elohistory"].append(database[x]["Elo"])
+        if "tshistory" not in database[x]:
+            database[x]["tshistory"] = []
+            database[x]["tshistory"].append(trueskilldelta)
+
     #############
     # ZSR2
     #############
-
-    avgwinnermmr = 0
-    avglosermmr = 0
-    avgwinnerunc = 0
-    avgloserunc = 0
-
-    for x in winners:
-        avgwinnermmr += database[x]["mmr"]
-        avgwinnerunc += database[x]["uncertainty"]
-    avgwinnermmr /= len(winners)
-    avgwinnerunc /= len(winners)
-
-    for x in losers:
-        avglosermmr += database[x]["mmr"]
-        avgloserunc += database[x]["uncertainty"]
-    avglosermmr /= len(losers)
-    avgloserunc /= len(losers)
-
-    flatdifference = avglosermmr - avgwinnermmr  # Gets the difference for our first formula
 
     serveraveragemmr = 0
     totalmmr = 0
@@ -213,17 +268,46 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
     if totalusers == 0:
         serveraveragemmr = 0
 
-    # serveraveragemmr = (totalmmr + 100) / (totalusers + 1)
+    avgwinnermmr = 0
+    avglosermmr = 0
+    winneradjustedmmr = 0
+    loseradjustedmmr = 0
 
-    winneradjustedmmr = max((((avgwinnermmr * (1000 - avgwinnerunc) / 1000) + (serveraveragemmr * avgwinnerunc / 1000)) / 2), avgwinnermmr)
-    loseradjustedmmr = max((((avglosermmr * (1000 - avgloserunc) / 1000) + (serveraveragemmr * avgloserunc / 1000)) / 2), avglosermmr)
+    for x in winners:
+        avgwinnermmr += database[x]["mmr"]
+        if database[x]["uncertainty"] > 500:
+            winneradjustedmmr += serveraveragemmr
+        else:
+            winneradjustedmmr += database[x]["mmr"]
+    avgwinnermmr /= len(winners)
+    winneradjustedmmr /= len(winners)
 
+    for x in losers:
+        avglosermmr += database[x]["mmr"]
+        if database[x]["uncertainty"] > 500:
+            loseradjustedmmr += serveraveragemmr
+        else:
+            loseradjustedmmr += database[x]["mmr"]
+    avglosermmr /= len(losers)
+    loseradjustedmmr /= len(losers)
+
+    if winneradjustedmmr < avgwinnermmr:
+        avgwinnermmr = winneradjustedmmr
+    if loseradjustedmmr < avglosermmr:
+        avglosermmr = loseradjustedmmr
+    
+    # winneradjustedmmr = max((((avgwinnermmr * (1000 - avgwinnerunc) / 1000) + (serveraveragemmr * avgwinnerunc / 1000)) / 2), avgwinnermmr)
+    # loseradjustedmmr = max((((avglosermmr * (1000 - avgloserunc) / 1000) + (serveraveragemmr * avgloserunc / 1000)) / 2), avglosermmr)
+
+    # print("zsr")
     for x in winners:
         mydifference = rankbase * 2 * (1 - (1 / (1 + (rankscaling ** (loseradjustedmmr - avgwinnermmr)))))
         # print(f"Winner diff no adjust: {mydifference}")
         
         mydifference *= winnerratio
+        # print(f"winner difference before: {mydifference}")
         mydifference = math.ceil(mydifference)
+        # print(f"winner difference after: {mydifference}")
 
         xuser = await guild.fetch_member(int(x))
         storage[x][1] = xuser.display_name
@@ -240,7 +324,9 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
         # except:
         #     pass
         mydifference *= loserratio
+        # print(f"loser difference before: {mydifference}")
         mydifference = math.ceil(mydifference)
+        # print(f"loser difference after: {mydifference}")
 
         xuser = await guild.fetch_member(int(x))
         storage[x][1] = xuser.display_name
@@ -253,18 +339,18 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
     # Uncertainty
     #############
 
-    if avglosermmr >= avgwinnermmr + 100:
+    if avglosermmr >= avgwinnermmr + 200:
         for x in allplayers:
-            database[x]["uncertainty"] += 50
+            database[x]["uncertainty"] += 51
 
-    if avgwinnermmr >= avglosermmr + 100:
+    if avgwinnermmr >= avglosermmr + 200:
         for x in allplayers:
             database[x]["uncertainty"] -= 50
 
-    if abs(avgwinnermmr - avglosermmr) < 100:
+    if abs(avgwinnermmr - avglosermmr) < 200:
         for x in allplayers:
             # database[x]["uncertainty"] -= 1
-            database[x]["uncertainty"] -= 50
+            database[x]["uncertainty"] -= 49
 
 
     for x in allplayers:
@@ -292,11 +378,19 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
     winnergain, loserloss = elo_rating(avgwinnerelo, avgloserelo, rankbase)
     # print(f"Elo: +{winnergain} -{loserloss}")
 
+    # print("Elo")
+    # print(winnergain)
+    # print(loserloss)
+    winnergain = math.ceil(winnergain * winnerratio)
+    loserloss = math.floor(loserloss * loserratio)
+    # print(winnergain)
+    # print(loserloss)
+
     for x in winners:
-        database[x]["Elo"] += winnergain * winnerratio
+        database[x]["Elo"] += winnergain
 
     for x in losers:
-        database[x]["Elo"] += loserloss * loserratio
+        database[x]["Elo"] += loserloss
 
     for x in allplayers:
         database[x]["Elo"] = round(database[x]["Elo"])
@@ -374,13 +468,6 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
     for x in allplayers:
         trueskilldelta = database[x]["TrueSkillMu"] - 3 * database[x]["TrueSkillSigma"]
 
-        if "zsrhistory" not in database[x]:
-            database[x]["zsrhistory"] = []
-        if "elohistory" not in database[x]:
-            database[x]["elohistory"] = []
-        if "tshistory" not in database[x]:
-            database[x]["tshistory"] = []
-
         database[x]["zsrhistory"].append(database[x]["mmr"])
         if len(database[x]["zsrhistory"]) > 200:
             database[x]["zsrhistory"] = database[x]["zsrhistory"][1:]
@@ -407,20 +494,26 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
         if trueskilldelta > database[x]["peakts"]:
             database[x]["peakts"] = trueskilldelta
 
+    tier2 = 250
+    tier3 = 500
+    tier4 = 750
+    tier5 = 1000
+    tier6 = 1250
+    tier7 = 1500
+    tier8 = 1750
+    tier9 = 2000
+    
     if "gamedata" not in database:
         database["gamedata"] = {}
-    if "mastertier" in database["gamedata"]:
-        tier2 = database["gamedata"]["silvertier"]
-        tier3 = database["gamedata"]["goldtier"]
-        tier4 = database["gamedata"]["platinumtier"]
-        tier5 = database["gamedata"]["diamondtier"]
-        tier6 = database["gamedata"]["mastertier"]
-    else:
-        tier2 = 200
-        tier3 = 400
-        tier4 = 600
-        tier5 = 800
-        tier6 = 1000
+    if "legendtier" in database["gamedata"]:
+        tier2 = database["gamedata"]["bronzetier"]
+        tier3 = database["gamedata"]["silvertier"]
+        tier4 = database["gamedata"]["goldtier"]
+        tier5 = database["gamedata"]["platinumtier"]
+        tier6 = database["gamedata"]["diamondtier"]
+        tier7 = database["gamedata"]["mastertier"]
+        tier8 = database["gamedata"]["grandmastertier"]
+        tier9 = database["gamedata"]["legendtier"]
 
     debugstring = ""
     bigstring = ("Winners:")
@@ -438,7 +531,7 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
         oldunc = storage[x][2]
         newunc = database[x]["uncertainty"]
 
-        emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(guildstring)
+        emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6, emoji_7, emoji_8, emoji_9 = loademoji(guildstring)
 
         emoji = emoji_1
         if mmr >= tier2:
@@ -451,6 +544,12 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
             emoji = emoji_5
         if mmr >= tier6:
             emoji = emoji_6
+        if mmr >= tier7:
+            emoji = emoji_7
+        if mmr >= tier8:
+            emoji = emoji_8
+        if mmr >= tier9:
+            emoji = emoji_9
 
         if sortstring == "TrueSkillMu":
             tempmmr = float(storage[x][0])
@@ -488,6 +587,12 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
             emoji = emoji_5
         if mmr >= tier6:
             emoji = emoji_6
+        if mmr >= tier7:
+            emoji = emoji_7
+        if mmr >= tier8:
+            emoji = emoji_8
+        if mmr >= tier9:
+            emoji = emoji_9
 
         if sortstring == "TrueSkillMu":
             tempmmr = float(storage[x][0])
@@ -513,12 +618,14 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
     #############
 
     if "rankroles" in database:
+        bothasrolepermissions = False
         guild = context.guild
         botuser = context.guild.me
         permissions1 = botuser.guild_permissions.manage_roles
-        mastername = database["rankroles"]["master"]
-        masterrole = discord.utils.get(guild.roles, name=mastername)
-        bothasrolepermissions = False
+        if "legend" in database["rankroles"]:
+            legendname = database["rankroles"]["legend"]
+            legendrole = discord.utils.get(guild.roles, name=legendname)
+
         for x in botuser.roles:
             try:
                 if x > masterrole:
@@ -529,7 +636,11 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
                     
         if bothasrolepermissions:
             try:
-                guild = client.get_guild(int(guildstring[:-5]))
+                guild = context.guild
+
+                ironname = database["rankroles"]["iron"]
+                ironrole = discord.utils.get(guild.roles, name=ironname)
+
                 bronzename = database["rankroles"]["bronze"]
                 bronzerole = discord.utils.get(guild.roles, name=bronzename)
                 silvername = database["rankroles"]["silver"]
@@ -542,6 +653,11 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
                 diamondrole = discord.utils.get(guild.roles, name=diamondname)
                 mastername = database["rankroles"]["master"]
                 masterrole = discord.utils.get(guild.roles, name=mastername)
+
+                grandmastername = database["rankroles"]["grandmaster"]
+                grandmasterrole = discord.utils.get(guild.roles, name=grandmastername)
+                legendname = database["rankroles"]["legend"]
+                legendrole = discord.utils.get(guild.roles, name=legendname)
 
                 for x in allplayers:
 
@@ -559,45 +675,68 @@ async def rankcalc(context, winners, losers, guildstring, undostring): # VERSION
                         newtier = 5
                     if mmr >= tier6:
                         newtier = 6
-                    
-                    
+                    if mmr >= tier7:
+                        newtier = 7
+                    if mmr >= tier8:
+                        newtier = 8
+                    if mmr >= tier9:
+                        newtier = 9
+
                     if newtier != 1:
+                        if ironrole in user.roles:
+                            await user.remove_roles(ironrole)
+                    if newtier != 2:
                         if bronzerole in user.roles:
                             await user.remove_roles(bronzerole)
-                    if newtier != 2:
+                    if newtier != 3:
                         if silverrole in user.roles:
                             await user.remove_roles(silverrole)
-                    if newtier != 3:
+                    if newtier != 4:
                         if goldrole in user.roles:
                             await user.remove_roles(goldrole)
-                    if newtier != 4:
+                    if newtier != 5:
                         if platrole in user.roles:
                             await user.remove_roles(platrole)
-                    if newtier != 5:
+                    if newtier != 6:
                         if diamondrole in user.roles:
                             await user.remove_roles(diamondrole)
-                    if newtier != 6:
+                    if newtier != 7:
                         if masterrole in user.roles:
                             await user.remove_roles(masterrole)
+                    if newtier != 8:
+                        if grandmasterrole in user.roles:
+                            await user.remove_roles(grandmasterrole)
+                    if newtier != 9:
+                        if legendrole in user.roles:
+                            await user.remove_roles(legendrole)
 
                     if newtier == 1:
+                        if ironrole not in user.roles:
+                            await user.add_roles(ironrole)
+                    if newtier == 2:
                         if bronzerole not in user.roles:
                             await user.add_roles(bronzerole)
-                    if newtier == 2:
+                    if newtier == 3:
                         if silverrole not in user.roles:
                             await user.add_roles(silverrole)
-                    if newtier == 3:
+                    if newtier == 4:
                         if goldrole not in user.roles:
                             await user.add_roles(goldrole)
-                    if newtier == 4:
+                    if newtier == 5:
                         if platrole not in user.roles:
                             await user.add_roles(platrole)
-                    if newtier == 5:
+                    if newtier == 6:
                         if diamondrole not in user.roles:
                             await user.add_roles(diamondrole)
-                    if newtier == 6:
+                    if newtier == 7:
                         if masterrole not in user.roles:
-                            await user.add_roles(masterrole)                
+                            await user.add_roles(masterrole)    
+                    if newtier == 8:
+                        if grandmasterrole not in user.roles:
+                            await user.add_roles(grandmasterrole)
+                    if newtier == 9:
+                        if legendrole not in user.roles:
+                            await user.add_roles(legendrole)             
 
             except:
                 bigstring = "Error with changing ranked roles. Check the bot's roles/permissions\n" + bigstring
@@ -679,43 +818,67 @@ def findstartingelo(guildstring):
         return 1000
 
 
-def loademoji(guildstring):
+def loademoji(guildstring): # 2.0 new ranked icons and includes Iron, Grandmaster, Legend
     with open(guildstring, 'r') as openfile:
         database = json.load(openfile)
 
-    if "rankemoji" in database:
-        bronze = database["rankemoji"]["bronze"]
-        silver = database["rankemoji"]["silver"]
-        gold = database["rankemoji"]["gold"]
-        plat = database["rankemoji"]["plat"]
-        diamond = database["rankemoji"]["diamond"]
-        master = database["rankemoji"]["master"]
+    iron = "<:Iron:1429924387603349597>"
+    bronze = "<:Bronze:1429924382654074991>"
+    silver = "<:Silver:1429924393760587818>"
+    gold = "<:Gold:1429924384537051277>"
+    plat = "<:Platinum:1429924392023883816>"
+    diamond = "<:Diamond:1429924383245209691>"
+    master = "<:Master:1429924390954471595>"
+    grandmaster = "<:Grandmaster:1429924385736622191>"
+    legend = "<:Legend:1429924389448712192>"
+
+    try:
+        if "rankemoji" in database:
+            bronze = database["rankemoji"]["bronze"]
+            silver = database["rankemoji"]["silver"]
+            gold = database["rankemoji"]["gold"]
+            plat = database["rankemoji"]["plat"]
+            diamond = database["rankemoji"]["diamond"]
+            master = database["rankemoji"]["master"]
+
+            iron = database["rankemoji"]["iron"]
+            grandmaster = database["rankemoji"]["grandmaster"]
+            legend = database["rankemoji"]["legend"]
+    except:
+        pass
     
-    else:
-        bronze = "<:Bronze:1056655601087828080>"
-        silver = "<:Silver:1056655619807006740>"
-        gold = "<:Gold:1056655634633867335>"
-        plat = "<:Platinum:1056655649922105374>"
-        diamond = "<:Diamond:1056655665361334372>"
-        master = "<:Master:1056655689155625140>"
+    # else: # Old Icons
+    #     bronze = "<:Bronze:1056655601087828080>"
+    #     silver = "<:Silver:1056655619807006740>"
+    #     gold = "<:Gold:1056655634633867335>"
+    #     plat = "<:Platinum:1056655649922105374>"
+    #     diamond = "<:Diamond:1056655665361334372>"
+    #     master = "<:Master:1056655689155625140>"
 
-    return bronze, silver, gold, plat, diamond, master
+    return iron, bronze, silver, gold, plat, diamond, master, grandmaster, legend
 
 
-class CommandTree(app_commands.CommandTree):
-    async def on_error(self, interaction: discord.Interaction, error: app_commands.CommandInvokeError) -> None:
-        print("~~~~~\nZing custom error:")
-        print(error)
-        if interaction.guild:
-            print(f"Guild: {interaction.guild.name} ~ {interaction.guild.id}")
-        print("~~~~~")
+# class CommandTree(app_commands.CommandTree):
+#     async def on_error(self, interaction: discord.Interaction, error: app_commands.CommandInvokeError) -> None:
+#         print("~~~~~\nZing custom error:")
+#         print(error)
+#         print(f"{interaction.user.name} ~ {interaction.user.id}")
+#         if interaction.guild:
+#             print(f"Guild: {interaction.guild.name} ~ {interaction.guild.id}")
+#         else:
+#             print("Not in guild")
+#         try:
+#             print(datetime.now())
+#         except:
+#             pass
+#         print("~~~~~")
 
-        # if "FileNotFoundError" in str(error):
-            # await interaction.response.send_message("Database not found. Create your server's database with **/setup**\ntry **/help** and **/faq** if youre still confused", ephemeral=True)
+#         # if "FileNotFoundError" in str(error):
+#             # await interaction.response.send_message("Database not found. Create your server's database with **/setup**\ntry **/help** and **/faq** if youre still confused", ephemeral=True)
 
-        user = interaction.user
-        dmchannel = await user.create_dm()
-        await dmchannel.send(content="You ran into an error with a command! Try **/help** and **/faq**\nIf youre still stuck, join our support server:\nhttps://discord.gg/Hq4ee6qkU8")
+#         user = interaction.user
+#         dmchannel = await user.create_dm()
+#         await dmchannel.send(content="You ran into an error with a command! Try **/help** and **/faq**\nIf youre still stuck, join our support server and ask for help:\nhttps://discord.gg/Hq4ee6qkU8")
 
 
 class Client(commands.Bot):
@@ -723,7 +886,7 @@ class Client(commands.Bot):
         super().__init__(
             command_prefix="}",
             intents=intents,
-            tree_cls=CommandTree,
+            # tree_cls=CommandTree,
             activity=discord.CustomActivity(name="/help /faq")
         )
 
@@ -732,8 +895,8 @@ class Client(commands.Bot):
 
         try:
             guild = discord.Object(id=1263283045616582757)
-            synced = await self.tree.sync(guild=guild) # private commands?
-            synced = await client.tree.sync() # public commands?
+            # synced = await self.tree.sync(guild=guild) # private commands?
+            # synced = await client.tree.sync() # public commands?
 
             # print(f"synched {len(synced)} command(s)")
         except Exception as e:
@@ -744,6 +907,7 @@ class Client(commands.Bot):
 guildid = discord.Object(id=1263283045616582757)
 intents = discord.Intents.default()
 intents.members = True
+# client = Client(command_prefix="}", intents=intents, activity=discord.CustomActivity(name="/help")) # Mind the command prefix. Change this when moving back to EIHR
 client = Client()
 
 
@@ -760,9 +924,10 @@ async def sync(interaction: discord.Interaction):
             print("Error syncing commands")
 
 
-@client.tree.command(name="help", description="Show the full list of commands and their permission levels.") # 1.2 more arrows by /setup
+@client.tree.command(name="help", description="Show the full list of commands and their permission levels.") # 1.5 show configmatchfoundchannel #
 async def help(interaction: discord.Interaction):
-    await interaction.response.send_message("**Command list:**\n<a:arrowright:1319062838332883045>**Public Commands:**\n"
+    await interaction.response.send_message(f"**Ranks dont look right?**\nOur ranked system just got updated. We now have 9 ranks instead of 6. Update your system with **/configemoji /configranktiers** and **/configrankroles**", ephemeral=True)
+    await interaction.followup.send("**Command list:**\n<a:arrowright:1319062838332883045>**Public Commands:**\n"
     "**/help:** Shows a list of commands\n"
     "**/setup:** Creates your server's database <a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990>\n"
     "**/faq:** Frequently asked questions and answers\n"
@@ -771,6 +936,7 @@ async def help(interaction: discord.Interaction):
     "**/oldleaderboard:** Shows your server's leaderboard in plaintext\n"
     "**/show:** Shows a user's detailed stats\n"
     "**/headtohead:** Shows someone's head-to-head records\n"
+    "**/randomtext:** Generate random text like from the queue\n"
     "<a:arrowright:1319062838332883045>**Lv 1 Commands:** Requires Lv 1 access\n"
     "**/showconfig:** Show's your server's config file\n"
     "**/undorank:** Undoes a user's last ranked game. (must be done individually for each user)\n"
@@ -784,9 +950,11 @@ async def help(interaction: discord.Interaction):
     "**/adjustuser:** Set the MMR(ZSR), Elo, wins, etc of a user\n"
     "**/backup:** Creates a backup of your server's database and posts it for download. (This can be sent to Zing if you need your backup restored)\n"
     "**/refreshroles:** If your user's ranked roles are not updated, this command will update them\n"
-    "**/configmmrtype:** Sets your server's default mmr type ~ Premium command!\n"
-    "**/configemoji:** Set your server's ranked emoji ~ Premium command!\n"
+    "**/configmmrtype:** Sets your server's default mmr type ~ *Premium* command!\n"
+    "**/configemoji:** Set your server's ranked emoji ~ *Premium* command!\n"
     "**/configqueuetext:** Configure random text to go with your queue\n"
+    "**/configresultschannel:** Send all match reports to a specified channel instead of in-place\n"
+    "**/configmatchfoundchannel:** Send all 'match found' to a specified channel instead of in-place\n"
     "<a:arrowright:1319062838332883045>**LV 3 Commands:** Requires Lv 3 access\n"
     "**/configrole:** Set a server role's permission access level <a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990><a:arrowleft:1319062852929064990>\n"
     "**/configstartelo:** Sets your server's starting Elo (not ZSR)\n"
@@ -794,6 +962,7 @@ async def help(interaction: discord.Interaction):
     "**/configrankbase:** Set what base value determines MMR gains and losses (ZSR and Elo)\n"
     "**/configrankroles:** Set what server roles are given for each rank\n"
     "**/newseason:** Start a new ranked season, with optional soft or hard MMR and Elo resets\n"
+    "**/createdatabase:** Create a new additional database, seperate from the main server, contained within a server category ~ *Premium command!*\n"
     "https://discord.gg/Hq4ee6qkU8", ephemeral=True)
 
 
@@ -830,28 +999,20 @@ async def setup(interaction: discord.Interaction):
         json.dump(database, outfile, indent=4)
 
 
-@client.tree.command(name="faq", description="Show some frequently asked questions and answers about Easy In-House Ranked")
+@client.tree.command(name="faq", description="Show some frequently asked questions and answers about Easy In-House Ranked") # 1.2 slight formatting and rewording #
 async def faq(interaction: discord.Interaction):
-    await interaction.response.send_message(f"""**How do I get the bot to join my server?**\nGo to <https://discord.gg/Hq4ee6qkU8> and view the 'about' channel.\n
-    **I just invited the bot and nothing is working**\nDo /setup to create your server's database. Then do /configrole to give permissions to discord roles.\n
-    **Still nothing is working**\nMake sure that the bot has role permissions to send messages in the channel. Then right click the bot and go to apps, then manage server integration, and make sure the bot's commands are enabled.\n
-    **Buttons are not working**\nSometimes the bot loses connection or crashes. Redo the text command.\n
-    **Commands were working but are not anymore**\nSometimes the bot loses connection or crashes. Wait 20 seconds or so. If things still aren't working, ping Zing in the support server""", ephemeral=True)
-    await interaction.followup.send(
-    """**Why does the bot ask for permission to manage roles?**\nThis is for the configurable 'ranked roles' feature. This is fully optional and you can refuse to give the bot permissions when inviting it to your server.\n
-    **How does the queue work?**\nStart the queue by typing /queue, then press 'Join Queue' to queue up for a game. The queue will then try to match people together for a game. This may take a few minutes as it tries to find the best game. This is still a WIP and may not work properly.\n
-    **How does X ranking system work?**\nZSR stands for 'Zing's Skill Ranking' (This is the default system) <https://docs.google.com/document/d/1mltKn8DoJwocRxjVKYutTM5FoSKkntKzpB5_0EwkVKI/edit?usp=sharing> (current ver. 2.2)\nElo: <https://en.wikipedia.org/wiki/Elo_rating_system>\nTrueskill: <https://en.wikipedia.org/wiki/TrueSkill> *(Trueskill treats all games as 1v1, using an average of the player's values)*\n
-    **Where is the support server?**\n<https://discord.gg/Hq4ee6qkU8>\n
-    **Where is the Terms of Service and Privacy Policy?**\n<https://docs.google.com/document/d/16NLoryJxJiBcaa9aFbDHA9fFJLtvdYujAwNseUcEyDs/edit?usp=sharing> <https://docs.google.com/document/d/1bkG66OTPzL5sHJY4TxUscfPPz3irqSzU8A3-2k02WDM/edit?usp=sharing>""", ephemeral=True)
+    await interaction.response.send_message(f"**Ranks dont look right?**\nOur ranked system just got updated. We now have 9 ranks instead of 6. Update your system with **/configemoji /configranktiers** and **/configrankroles**", ephemeral=True)
+    await interaction.followup.send(f"""**How do I get the bot to join my server?**\nGo to <https://discord.gg/Hq4ee6qkU8> and view the 'about' channel.\n\n**I just invited the bot and nothing is working**\nDo /setup to create your server's database. Then do /configrole to give permissions to discord roles.\n\n**Still nothing is working**\nMake sure that the bot has a server role with permissions to view the channel and send messages in the channel. Then right click the bot and go to apps, then manage server integration, and make sure the bot's commands are enabled.\n\n**Buttons are not working**\nSometimes the bot loses connection or crashes. Redo the text command.\n\n**Commands were working but are not anymore**\nSometimes the bot loses connection or crashes. Wait 20 seconds or so. If things still aren't working, ping Zing in the support server""", ephemeral=True)
+    await interaction.followup.send("""**Why does the bot ask for permission to manage roles?**\nThis is for the configurable 'ranked roles' feature. This is fully optional and you can refuse to give the bot permissions when inviting it to your server.\n\n**How does the queue work?**\nStart the queue by typing /queue, then press 'Join Queue' to queue up for a game. The queue will then try to match people together for a game. This may take a few minutes as it tries to find the best game. This is still a WIP and may not work properly.\n\n**How does X ranking system work?**\nZSR stands for 'Zing's Skill Ranking' (This is the default system) <https://docs.google.com/document/d/1EkJUNsmMusgMi4wWVJW56OnqjNg84C0d9wJ9ROz9C8g/edit?usp=sharing> (current ver. 2.13)\nElo: <https://en.wikipedia.org/wiki/Elo_rating_system>\nTrueskill: <https://en.wikipedia.org/wiki/TrueSkill> *(Trueskill treats all games as 1v1, using an average of the player's values)*\n\n**Where is the support server?**\n<https://discord.gg/Hq4ee6qkU8>\n\n**Where is the Terms of Service and Privacy Policy?**\n<https://docs.google.com/document/d/16NLoryJxJiBcaa9aFbDHA9fFJLtvdYujAwNseUcEyDs/edit?usp=sharing> <https://docs.google.com/document/d/1bkG66OTPzL5sHJY4TxUscfPPz3irqSzU8A3-2k02WDM/edit?usp=sharing>""", ephemeral=True)
 
 
-@client.tree.command(name="debug", description="Send some info to Zing") # 1.3 sends to bot logs channel #
+@client.tree.command(name="debug", description="Send some info to Zing") # 1.6.2 check for database entitlement and new databases and configresultschannel #
 async def debug(interaction: discord.Interaction):
     user = interaction.user
     userid = user.id
     y = ""
 
-    debugstring = "\n--------------------\nDebug\n"
+    debugstring = "\n--------------------\nDebug <@215277233638604800>\n"
 
     debugstring += f"Username: {user} ~ {userid}\n"
 
@@ -859,21 +1020,27 @@ async def debug(interaction: discord.Interaction):
         debugstring += "not interaction.guild\n"
 
     if interaction.guild:
+        print(f"Debug in {interaction.guild.id}")
+
         debugstring += "interaction.guild\n"
-        guildid = str(interaction.guild.id)
-        guildname = str(interaction.guild.name)
-        debugstring += f"Guild name: {guildname}\n"
-        debugstring += f"Guild ID: {guildid}\n"
+        debugstring += f"Guild name: {interaction.guild.name}\n"
+        debugstring += f"Guild ID: {str(interaction.guild.id)}\n"
 
-        guildstring = guildid + ".json"
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
+        undodatabase = loadundodatabase(interaction)
+        undostring = getundostring(interaction)
 
-        try:
-            with open(guildstring, 'r') as openfile:
-                database = json.load(openfile)
-            debugstring += f"Database found: {guildstring}\n"
-        except:
-            debugstring += f"No database found: {guildid}\n" 
+        if database:
+            debugstring += f"Database found: {databasestring}\n"
+        else:
+            debugstring += f"No database found: {guildid} {databasestring}\n" 
 
+        if undodatabase:
+            debugstring += f"Database found: {undostring}\n"
+        else:
+            debugstring += f"No database found: {guildid} {undostring}\n" 
+        
         if "serverroles" in database:
             debugstring += "Database/Server Roles:\n"
             for x in database["serverroles"]:
@@ -936,8 +1103,11 @@ async def debug(interaction: discord.Interaction):
             if "rankbase" in database["gamedata"]:
                 debugstring += f"Rank base: {database['gamedata']['rankbase']}\n"
 
-            if "mastertier" in database["gamedata"]:
-                debugstring += "Ranked tiers: 0, " + str(database["gamedata"]["silvertier"]) + ", " + str(database["gamedata"]["goldtier"]) + ", " + str(database["gamedata"]["platinumtier"]) + ", " + str(database["gamedata"]["diamondtier"]) + ", " + str(database["gamedata"]["mastertier"]) + "\n"
+            if "legendtier" in database["gamedata"]:
+                debugstring += "Ranked tiers: 0, " + str(database["gamedata"]["bronzetier"]) + ", " + str(database["gamedata"]["silvertier"]) + ", " + str(database["gamedata"]["goldtier"]) + ", " + str(database["gamedata"]["platinumtier"]) + ", " + str(database["gamedata"]["diamondtier"]) + ", " + str(database["gamedata"]["mastertier"]) + ", " + str(database["gamedata"]["grandmastertier"]) + ", " + str(database["gamedata"]["legendtier"]) + "\n"
+
+            if "mastertier" in database["gamedata"] and "legendtier" not in database["gamedata"]:
+                debugstring += "Outdated ranked tier values\n"
 
             if "startingelo" in database["gamedata"]:
                 debugstring += f"Starting Elo: {database['gamedata']['startingelo']}\n"
@@ -947,12 +1117,24 @@ async def debug(interaction: discord.Interaction):
 
         if "rankroles" in database["gamedata"]:
             debugstring += "Rank roles:\n"
+            try:
+                debugstring += f"Iron: {database['rankroles']['iron']}\n"
+            except:
+                debugstring += "No role for Iron\n"
             debugstring += f"Bronze: {database['rankroles']['bronze']}\n"
             debugstring += f"Silver: {database['rankroles']['silver']}\n"
             debugstring += f"Gold: {database['rankroles']['gold']}\n"
             debugstring += f"Platinum: {database['rankroles']['platinum']}\n"
             debugstring += f"Diamond: {database['rankroles']['diamond']}\n"
             debugstring += f"Master: {database['rankroles']['master']}\n"
+            try:
+                debugstring += f"Grandmaster: {database['rankroles']['grandmaster']}\n"
+            except:
+                debugstring += "No role for Grandmaster\n"
+            try:
+                debugstring += f"Legend: {database['rankroles']['legend']}\n"
+            except:
+                debugstring += "No role for Legend\n"
 
 
         async for x in client.entitlements(user=interaction.user):
@@ -960,9 +1142,14 @@ async def debug(interaction: discord.Interaction):
                 debugstring += "Has entitlement: configmmrtype 1361516425172357320\n"
             if x.sku_id == 1380004058797965392:
                 debugstring += "Has entitlement: configemoji 1380004058797965392\n"
+            if x.sku_id == 1454212285903012023:
+                debugstring += "Has entitlement: Additional Database 1454212285903012023\n"
 
         if "rankemoji" in database:
-            debugstring += f"Rank Emoji:\nBronze: {database["rankemoji"]["bronze"]}\nSilver: {database["rankemoji"]["silver"]}\nGold: {database["rankemoji"]["gold"]}\nPlatinum: {database["rankemoji"]["plat"]}\nDiamond: {database["rankemoji"]["diamond"]}\nMaster: {database["rankemoji"]["master"]}\n"
+            if "iron" not in database["rankemoji"]:
+                debugstring += f"Rank Emoji:\nBronze: {database["rankemoji"]["bronze"]}\nSilver: {database["rankemoji"]["silver"]}\nGold: {database["rankemoji"]["gold"]}\nPlatinum: {database["rankemoji"]["plat"]}\nDiamond: {database["rankemoji"]["diamond"]}\nMaster: {database["rankemoji"]["master"]}\n"
+            if "iron" in database["rankemoji"]:
+                debugstring += f"Rank Emoji:\nIron: {database["rankemoji"]["iron"]}\nBronze: {database["rankemoji"]["bronze"]}\nSilver: {database["rankemoji"]["silver"]}\nGold: {database["rankemoji"]["gold"]}\nPlatinum: {database["rankemoji"]["plat"]}\nDiamond: {database["rankemoji"]["diamond"]}\nMaster: {database["rankemoji"]["master"]}\nGrandmaster: {database["rankemoji"]["grandmaster"]}\nLegend: {database["rankemoji"]["legend"]}"
 
         guild = interaction.guild
         botuser = interaction.guild.me
@@ -983,6 +1170,14 @@ async def debug(interaction: discord.Interaction):
             mastername = database["rankroles"]["master"]
             masterrole = discord.utils.get(guild.roles, name=mastername)
 
+            if "iron" in database["rankroles"]:
+                ironname = database["rankroles"]["iron"]
+                ironrole = discord.utils.get(guild.roles, name=ironname)
+                grandmastername = database["rankroles"]["grandmaster"]
+                grandmasterrole = discord.utils.get(guild.roles, name=grandmastername)
+                legendname = database["rankroles"]["legend"]
+                legendrole = discord.utils.get(guild.roles, name=legendname)
+
             if permissions1:
                 for x in botuser.roles:
                     if x > masterrole:
@@ -991,7 +1186,10 @@ async def debug(interaction: discord.Interaction):
                                 if x > goldrole:
                                     if x > silverrole:
                                         if x > bronzerole:
-                                            bothasrolepermissions = True
+                                            if x > legendrole:
+                                                if x > grandmasterrole:
+                                                    if x > ironrole:
+                                                        bothasrolepermissions = True
 
         debugstring += f"Bot manage roles permission: {bothasrolepermissions}\n"
 
@@ -1011,6 +1209,9 @@ async def debug(interaction: discord.Interaction):
                 except:
                     pass
 
+        if "voicechannels" in database:
+            debugstring += f"Voicechannels: \n{database["voicechannels"]["waitingchannel"]}\n{database["voicechannels"]["redchannel"]}\n{database["voicechannels"]["bluechannel"]}\n"
+
     # name1 = str(bot.get_user(int(userid)))
     # name2 = str(bot.get_user(str(userid)))
     # name3 = str(await bot.fetch_user(int(userid)))
@@ -1026,14 +1227,11 @@ async def debug(interaction: discord.Interaction):
     await interaction.response.send_message("*Debug sent to Zing*\n*If you need help, join our support server* https://discord.gg/Hq4ee6qkU8", ephemeral=True)
 
 
-@client.tree.command(name="showconfig", description="Show your server's config file") # 1.2 Added queuetext
+@client.tree.command(name="showconfig", description="Show your server's config file") # 1.5 show configmatchfoundchannel #
 async def showconfig(interaction: discord.Interaction):
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
 
         user = interaction.user
         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
@@ -1070,21 +1268,26 @@ async def showconfig(interaction: discord.Interaction):
             if "rankbase" in database["gamedata"]:
                 bigstring = bigstring + "Rank Base: " + str(database["gamedata"]["rankbase"]) + "\n"
 
-            if "mastertier" in database["gamedata"]:
-                bigstring = bigstring + "Ranked tiers: 0, " + str(database["gamedata"]["silvertier"]) + ", " + str(database["gamedata"]["goldtier"]) + ", " + str(database["gamedata"]["platinumtier"]) + ", " + str(database["gamedata"]["diamondtier"]) + ", " + str(database["gamedata"]["mastertier"]) + "\n"
+            if "legendtier" in database["gamedata"]:
+                bigstring = bigstring + "Ranked tiers: 0, " + str(database["gamedata"]["bronzetier"]) + ", " + str(database["gamedata"]["silvertier"]) + ", " + str(database["gamedata"]["goldtier"]) + ", " + str(database["gamedata"]["platinumtier"]) + ", " + str(database["gamedata"]["diamondtier"]) + ", " + str(database["gamedata"]["mastertier"]) + ", " + str(database["gamedata"]["grandmastertier"]) + ", " + str(database["gamedata"]["legendtier"]) + "\n"
+
+            if "mastertier" in database["gamedata"] and "legendtier" not in database["gamedata"]:
+                bigstring += "New tiers not configured\n"
 
             if "startingelo" in database["gamedata"]:
                 bigstring = bigstring + "Starting Elo: " + str(database["gamedata"]["startingelo"]) + "\n"
 
             if "rankroles" in database:
-                bigstring = bigstring + "**Rank Roles:**\n"
-                tempstring = (f"Bronze: {database["rankroles"]["bronze"]}\nSilver: {database["rankroles"]["silver"]}\nGold: {database["rankroles"]["gold"]}\nPlatinum: {database["rankroles"]["platinum"]}\nDiamond: {database["rankroles"]["diamond"]}\nMaster: {database["rankroles"]["master"]}")
-                bigstring = bigstring + tempstring
+                if "iron" in database["rankroles"]:
+                    bigstring = bigstring + "**Rank Roles:**\n"
+                    tempstring = (f"Iron: {database["rankroles"]["iron"]}\nBronze: {database["rankroles"]["bronze"]}\nSilver: {database["rankroles"]["silver"]}\nGold: {database["rankroles"]["gold"]}\nPlatinum: {database["rankroles"]["platinum"]}\nDiamond: {database["rankroles"]["diamond"]}\nMaster: {database["rankroles"]["master"]}\nGrandmaster: {database["rankroles"]["grandmaster"]}\nLegend: {database["rankroles"]["legend"]}")
+                    bigstring = bigstring + tempstring
 
             if "rankemoji" in database:
-                bigstring = bigstring + "**Rank Emoji:**\n"
-                tempstring = (f"Bronze: {database["rankemoji"]["bronze"]}\nSilver: {database["rankemoji"]["silver"]}\nGold: {database["rankemoji"]["gold"]}\nPlatinum: {database["rankemoji"]["plat"]}\nDiamond: {database["rankemoji"]["diamond"]}\nMaster: {database["rankemoji"]["master"]}\n")
-                bigstring = bigstring + tempstring
+                if "iron" in database["rankemoji"]:
+                    bigstring = bigstring + "**Rank Emoji:**\n"
+                    tempstring = (f"Iron: {database["rankemoji"]["iron"]}\nBronze: {database["rankemoji"]["bronze"]}\nSilver: {database["rankemoji"]["silver"]}\nGold: {database["rankemoji"]["gold"]}\nPlatinum: {database["rankemoji"]["plat"]}\nDiamond: {database["rankemoji"]["diamond"]}\nMaster: {database["rankemoji"]["master"]}\nGrandmaster: {database["rankemoji"]["grandmaster"]}\nLegend: {database["rankemoji"]["legend"]}\n")
+                    bigstring = bigstring + tempstring
 
             if "mmrtype" in database["gamedata"]:
                 bigstring = bigstring + "MMR type: " + str(database["gamedata"]["mmrtype"]) + "\n"
@@ -1092,49 +1295,45 @@ async def showconfig(interaction: discord.Interaction):
             if "queuetext" in database:
                 bigstring = bigstring + "**Queue Text:**"
                 for x in database["queuetext"]:
-                    if x in ["lista", "listb", "listc", "listd", "liste", "listf", "listg", "listh", "listi", "listj"]:
-                        bigstring = bigstring + "\n" + database["queuetext"][x]
+                    try:
+                        if x in ["lista", "listb", "listc", "listd", "liste", "listf", "listg", "listh", "listi", "listj"]:
+                            bigstring = bigstring + "\n" + database["queuetext"][x]
+                    except:
+                        pass
                 if "digits" in database["queuetext"]:
                     bigstring = bigstring + "\nDigits: " + str(database["queuetext"]["digits"]) + "\n"
             
+            if "voicechannels" in database:
+                bigstring = bigstring + f"Voicechannels: \n{database["voicechannels"]["waitingchannel"]}\n{database["voicechannels"]["redchannel"]}\n{database["voicechannels"]["bluechannel"]}\n"
+
+            if "resultschannel" in database:
+                bigstring = bigstring + "results channel found: " + database["resultschannel"] + "\n"
+
+            if "matchfoundchannel" in database:
+                bigstring = bigstring + "'match found' channel found: " + database["matchfoundchannel"] + "\n"
+
             await interaction.response.send_message(bigstring)
 
-            print(f"\nShowconfig in {guildname}")
-            try:
-                print(database["serverroles"])
-            except:
-                pass
-            try:
-                print(database["gamedata"])
-            except:
-                pass
-            try:
-                print(database["rankemoji"])
-            except:
-                pass
-            try:
-                print(database["queuetext"])
-            except:
-                pass
-            print()
+            print(f"\nShowconfig in {interaction.guild.id}")
 
 
-@client.tree.command(name="configemoji", description="PREMIUM FEATURE ~ WIP ~ Set custom emoji for each ranked tier") # 1.0 implemented check for purchase #
+@client.tree.command(name="configemoji", description="PREMIUM FEATURE ~ WIP ~ Set custom emoji for each ranked tier") # 1.2.1 new databases support #
+@app_commands.describe(iron = "Which emoji will be given for Iron?")
 @app_commands.describe(bronze = "Which emoji will be given for Bronze?")
 @app_commands.describe(silver = "Which emoji will be given for Silver?")
 @app_commands.describe(gold = "Which emoji will be given for Gold?")
 @app_commands.describe(plat = "Which emoji will be given for Platinum?")
 @app_commands.describe(diamond = "Which emoji will be given for Diamond?")
 @app_commands.describe(master = "Which emoji will be given for Master?")
-async def configemoji(interaction: discord.Interaction, bronze: str, silver: str, gold: str, plat: str, diamond: str, master: str):
+@app_commands.describe(grandmaster = "Which emoji will be given for Grandmaster?")
+@app_commands.describe(legend = "Which emoji will be given for Legend?")
+async def configemoji(interaction: discord.Interaction, iron: str, bronze: str, silver: str, gold: str, plat: str, diamond: str, master: str, grandmaster: str, legend: str):
     user = interaction.user
     valid = False
     paid = False
 
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
         valid = True
@@ -1161,29 +1360,31 @@ async def configemoji(interaction: discord.Interaction, bronze: str, silver: str
         if "rankemoji" not in database:
             database["rankemoji"] = {}
 
+        database["rankemoji"]["iron"] = iron
         database["rankemoji"]["bronze"] = bronze
         database["rankemoji"]["silver"] = silver
         database["rankemoji"]["gold"] = gold
         database["rankemoji"]["plat"] = plat
         database["rankemoji"]["diamond"] = diamond
         database["rankemoji"]["master"] = master
+        database["rankemoji"]["grandmaster"] = grandmaster
+        database["rankemoji"]["legend"] = legend
 
-        await interaction.response.send_message(f"Ranked emoji set: {bronze} {silver} {gold} {plat} {diamond} {master}")
 
-        with open(guildstring, "w") as outfile:
+        await interaction.response.send_message(f"Ranked emoji set: {iron} {bronze} {silver} {gold} {plat} {diamond} {master} {grandmaster} {legend}")
+
+        with open(databasestring, "w") as outfile:
             json.dump(database, outfile, indent = 4)
 
 
-@client.tree.command(name="configrole", description="Configure your server's role permissions") # Slash command 0.1
+@client.tree.command(name="configrole", description="Configure your server's role permissions") # 1.1.1 new databases support #
 @app_commands.describe(inputrole = "Which role?")
 @app_commands.describe(chooselevel = "Permission Level: 0, 1, 2, 3")
 async def configrole(interaction: discord.Interaction, inputrole: discord.guild.Role, chooselevel: str):
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         if "serverroles" not in database:
             database["serverroles"] = {}
@@ -1206,12 +1407,10 @@ async def configrole(interaction: discord.Interaction, inputrole: discord.guild.
                 if valid == True:
                     rolename = str(inputrole)
                     database["serverroles"][rolename] = chooselevel
-                    print(guildstring)
-                    print(database["serverroles"])
 
                     await interaction.response.send_message(f"{rolename} set to level {chooselevel}")
 
-                    with open(guildstring, "w") as outfile:
+                    with open(databasestring, "w") as outfile:
                         json.dump(database, outfile, indent=4)
 
             else:
@@ -1221,16 +1420,16 @@ async def configrole(interaction: discord.Interaction, inputrole: discord.guild.
         #     await interaction.response.send_message(f"?config <Role Name> <Permission Level (0, 1, 2, 3)>\nRequires 'administrator' or 'Manage Server' permissions or lv 3 permissions")
 
 
-@client.tree.command(name="configgame", description="Configure your server's game name") # Slash command 0.1
+@client.tree.command(name="configgame", description="Configure your server's game name") # 1.1.1 new databases support #
 @app_commands.describe(inputname = "What is the name of your game?")
 async def configgame(interaction: discord.Interaction, inputname: str):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
+        undodatabase = loadundodatabase(interaction)
+        undostring = getundostring(interaction)
 
         if "serverroles" not in database:
             database["serverroles"] = {}
@@ -1253,20 +1452,19 @@ async def configgame(interaction: discord.Interaction, inputname: str):
 
                 await interaction.response.send_message(f"Server game name changed to {inputname}")
 
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)
 
 
-@client.tree.command(name="configstartelo", description="Configure your server's starting elo") # Slash command 0.1
+@client.tree.command(name="configstartelo", description="Configure your server's starting elo") #  1.1.1 new databases support #
 @app_commands.describe(inputelo = "What elo do you want new players to start at? (default 1000)")
 async def configstartelo(interaction: discord.Interaction, inputelo: int):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         if "serverroles" not in database:
             database["serverroles"] = {}
@@ -1289,25 +1487,25 @@ async def configstartelo(interaction: discord.Interaction, inputelo: int):
 
                 await interaction.response.send_message(f"Starting Elo set to {inputelo}")
 
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)
 
 
-@client.tree.command(name="configranktiers", description="Configure which values are required to hit each rank") # Slash command 0.1
+@client.tree.command(name="configranktiers", description="Configure which values are required to hit each rank") # 1.2.1 support for new databases #
+@app_commands.describe(bronze = "How many ZSR points required to hit Bronze?")
 @app_commands.describe(silver = "How many ZSR points required to hit Silver?")
 @app_commands.describe(gold = "How many ZSR points required to hit Gold?")
 @app_commands.describe(plat = "How many ZSR points required to hit Platinum?")
 @app_commands.describe(diamond = "How many ZSR points required to hit Diamond?")
 @app_commands.describe(master = "How many ZSR points required to hit Master?")
-async def configranktiers(interaction: discord.Interaction, silver: int, gold: int, plat: int, diamond: int, master: int):
+@app_commands.describe(grandmaster = "How many ZSR points required to hit Grandmaster?")
+@app_commands.describe(legend = "How many ZSR points required to hit Legend?")
+async def configranktiers(interaction: discord.Interaction, bronze: int, silver: int, gold: int, plat: int, diamond: int, master: int, grandmaster: int, legend: int):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
         if "serverroles" not in database:
             database["serverroles"] = {}
 
@@ -1325,30 +1523,31 @@ async def configranktiers(interaction: discord.Interaction, silver: int, gold: i
                 if "gamedata" not in database:
                     database["gamedata"] = {}
 
+                database["gamedata"]["bronzetier"] = bronze
                 database["gamedata"]["silvertier"] = silver
                 database["gamedata"]["goldtier"] = gold
                 database["gamedata"]["platinumtier"] = plat
                 database["gamedata"]["diamondtier"] = diamond
                 database["gamedata"]["mastertier"] = master
+                database["gamedata"]["grandmastertier"] = grandmaster
+                database["gamedata"]["legendtier"] = legend
 
-                emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(guildstring)
+                emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6, emoji_7, emoji_8, emoji_9 = loademoji(databasestring)
 
-                await interaction.response.send_message(f"Tiers updated:\n{emoji_1}Bronze: 0\n{emoji_2}Silver: {silver}\n{emoji_3}Gold: {gold}\n{emoji_4}Platinum: {plat}\n{emoji_5}Diamond: {diamond}\n{emoji_6}Master: {master}")
+                await interaction.response.send_message(f"Tiers updated:\n{emoji_1}Iron: 0\n{emoji_2}Bronze: {bronze}\n{emoji_3}Silver: {silver}\n{emoji_4}Gold: {gold}\n{emoji_5}Platinum: {plat}\n{emoji_6}Diamond: {diamond}\n{emoji_7}Master: {master}\n{emoji_8}Grandmaster: {grandmaster}\n{emoji_9}Legend: {legend}")
 
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)
 
 
-@client.tree.command(name="configrankbase", description="Configure your server's base rank change value (recommended: 10 - 60)") # 1.1 updated description # 
+@client.tree.command(name="configrankbase", description="Configure your server's base rank change value (recommended: 10 - 60)") # 1.2.1 support for new databases # 
 @app_commands.describe(inputbase = "What base value do you want to determine players ZSR and Elo gains/losses? (default 30)")
 async def configrankbase(interaction: discord.Interaction, inputbase: int):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         if "serverroles" not in database:
             database["serverroles"] = {}
@@ -1371,20 +1570,18 @@ async def configrankbase(interaction: discord.Interaction, inputbase: int):
 
                 await interaction.response.send_message(f"Changed rank base value to {inputbase}")
 
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)                
 
 
-@client.tree.command(name="configseason", description="Change the name of the current season") # Slash command 0.1
+@client.tree.command(name="configseason", description="Change the name of the current season") # 1.1.1 support for new databases #
 @app_commands.describe(inputseason = "What is the name of the current season?")
 async def configseason(interaction: discord.Interaction, inputseason: str):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         if "serverroles" not in database:
             database["serverroles"] = {}
@@ -1406,27 +1603,28 @@ async def configseason(interaction: discord.Interaction, inputseason: str):
 
                 await interaction.response.send_message(f"Season set to {inputseason}")
 
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)            
 
 
-@client.tree.command(name="configrankroles", description="Configure which roles will be given for each rank.") # Slash command 0.1
+@client.tree.command(name="configrankroles", description="Configure which roles will be given for each rank.") # 1.2.1 support for new databases #
+@app_commands.describe(iron = "Which role will be given for Iron?")
 @app_commands.describe(bronze = "Which role will be given for Bronze?")
 @app_commands.describe(silver = "Which role will be given for Silver?")
 @app_commands.describe(gold = "Which role will be given for Gold?")
 @app_commands.describe(plat = "Which role will be given for Platinum?")
 @app_commands.describe(diamond = "Which role will be given for Diamond?")
 @app_commands.describe(master = "Which role will be given for Master?")
-async def configrankroles(interaction: discord.Interaction, bronze: discord.guild.Role, silver: discord.guild.Role, gold: discord.guild.Role, plat: discord.guild.Role, diamond: discord.guild.Role, master: discord.guild.Role):
+@app_commands.describe(grandmaster = "Which role will be given for Grandmaster?")
+@app_commands.describe(legend = "Which role will be given for Legend?")
+async def configrankroles(interaction: discord.Interaction, iron: discord.guild.Role, bronze: discord.guild.Role, silver: discord.guild.Role, gold: discord.guild.Role, plat: discord.guild.Role, diamond: discord.guild.Role, master: discord.guild.Role, grandmaster: discord.guild.Role, legend: discord.guild.Role):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
-        if None not in (bronze, silver, gold, plat, diamond, master):
+        if None not in (iron, bronze, silver, gold, plat, diamond, master, grandmaster, legend):
             if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
                 valid = True
 
@@ -1438,20 +1636,23 @@ async def configrankroles(interaction: discord.Interaction, bronze: discord.guil
                             valid = True
 
             if valid == True:
+                iron = iron.name
                 bronze = bronze.name
                 silver = silver.name
                 gold = gold.name
                 plat = plat.name
                 diamond = diamond.name
                 master = master.name
+                grandmaster = grandmaster.name
+                legend = legend.name
 
-                database["rankroles"] = {"bronze": bronze, "silver": silver, "gold": gold, "platinum": plat, "diamond": diamond, "master": master}
-                with open(guildstring, "w") as outfile:
+                database["rankroles"] = {"iron": iron, "bronze": bronze, "silver": silver, "gold": gold, "platinum": plat, "diamond": diamond, "master": master, "grandmaster": grandmaster, "legend": legend}
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent=4)
-                await interaction.response.send_message(f"Rank roles: {bronze}, {silver}, {gold}, {plat}, {diamond}, {master} have been set.")
+                await interaction.response.send_message(f"Rank roles: {iron}, {bronze}, {silver}, {gold}, {plat}, {diamond}, {master}, {grandmaster}, {legend} have been set.")
 
 
-@client.tree.command(name="configqueuetext", description="Configure random text to go with queue/matchmaking") # 1.3 You can now submit empty entries to clear them and remove queuetext #
+@client.tree.command(name="configqueuetext", description="Configure random text to go with queue/matchmaking") # 1.4.1 support for new databases #
 @app_commands.describe(digits = "How many digits of random numbers? (optional, 1-12)")
 @app_commands.describe(lista = "Input each entry to select from randomly, seperated by commas (,) (<- no space) (optional)")
 @app_commands.describe(listb = "Input each entry to select from randomly, seperated by commas (,) (<- no space) (optional)")
@@ -1464,10 +1665,8 @@ async def configrankroles(interaction: discord.Interaction, bronze: discord.guil
 @app_commands.describe(listi = "Input each entry to select from randomly, seperated by commas (,) (<- no space) (optional)")
 @app_commands.describe(listj = "Input each entry to select from randomly, seperated by commas (,) (<- no space) (optional)")
 async def configqueuetext(interaction: discord.Interaction, digits: int = None, lista: str = None, listb: str = None, listc: str = None, listd: str = None, liste: str = None, listf: str = None, listg: str = None, listh: str = None, listi: str = None, listj: str = None):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     if interaction.user.guild_permissions.manage_guild == True or interaction.user.guild_permissions.administrator == True or str(interaction.user.id) == "215277233638604800":
         valid = True
@@ -1514,20 +1713,18 @@ async def configqueuetext(interaction: discord.Interaction, digits: int = None, 
 
         await interaction.response.send_message(mystring)
 
-        with open(guildstring, "w") as outfile:
+        with open(databasestring, "w") as outfile:
             json.dump(database, outfile, indent = 4)
 
 
-@client.tree.command(name="configmmrtype", description="PREMIUM FEATURE ~ Choose which type of mmr you want to be the server default") # 1.1 implemented check for purchase #
+@client.tree.command(name="configmmrtype", description="PREMIUM FEATURE ~ Choose which type of mmr you want to be the server default") # 1.2.1 supports new databases #
 async def configmmrtype(interaction: discord.Interaction):
     user = interaction.user
     valid = False
     paid = False
 
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
         valid = True
@@ -1548,10 +1745,10 @@ async def configmmrtype(interaction: discord.Interaction):
         await interaction.response.send_message("You do not have permission to use this command. (This is a premium feature)", ephemeral=True)
 
     if valid == True and paid == True:
-        await interaction.response.send_message("Choose which type of mmr you want to be the server default", view=MMRTypeButtons(interaction.guild.id, user.id, guildstring))
+        await interaction.response.send_message("Choose which type of mmr you want to be the server default", view=MMRTypeButtons(interaction.guild.id, user.id, databasestring))
 
 
-class MMRTypeButtons(discord.ui.View): # 1.1 red cancel button #
+class MMRTypeButtons(discord.ui.View): # 1.1.1 support for new databases #
     def __init__(self, guildid, userid, guildstring):
         super().__init__(timeout=None)
         self.guildid = guildid
@@ -1561,8 +1758,7 @@ class MMRTypeButtons(discord.ui.View): # 1.1 red cancel button #
     @discord.ui.button(label="ZSR", style=discord.ButtonStyle.green)
     async def ChooseZSRButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id == self.userid:
-            guildname = str(interaction.guild.id)
-            guildstring = guildname + ".json"
+            guildstring = self.guildstring
             with open(guildstring, 'r') as openfile:
                 database = json.load(openfile)
             
@@ -1577,8 +1773,7 @@ class MMRTypeButtons(discord.ui.View): # 1.1 red cancel button #
     @discord.ui.button(label="Elo", style=discord.ButtonStyle.green)
     async def ChooseEloButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id == self.userid: 
-            guildname = str(interaction.guild.id)
-            guildstring = guildname + ".json"
+            guildstring = self.guildstring
             with open(guildstring, 'r') as openfile:
                 database = json.load(openfile)
             
@@ -1593,8 +1788,7 @@ class MMRTypeButtons(discord.ui.View): # 1.1 red cancel button #
     @discord.ui.button(label="TrueSkill", style=discord.ButtonStyle.green)
     async def ChooseTrueSkillButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id == self.userid:
-            guildname = str(interaction.guild.id)
-            guildstring = guildname + ".json"
+            guildstring = self.guildstring
             with open(guildstring, 'r') as openfile:
                 database = json.load(openfile)
             
@@ -1612,14 +1806,56 @@ class MMRTypeButtons(discord.ui.View): # 1.1 red cancel button #
             await interaction.response.edit_message(content="Canceled operation", view=None)
 
 
-@client.tree.command(name="headtohead", description="Shows your head to head records") # Slash command 0.1
+@client.tree.command(name="configvoicechannels", description="Choose voice channels for queue teams") # 1.1.1 support for new databases #
+@app_commands.describe(waitingchannel = "Select Waiting Room Voice Channel")
+@app_commands.describe(bluechannel = "Select Blue Team Voice Channel")
+@app_commands.describe(redchannel = "Select Red Team Voice Channel")
+async def configvoicechannels(interaction: discord.Interaction, waitingchannel: discord.VoiceChannel, bluechannel: discord.VoiceChannel, redchannel: discord.VoiceChannel):
+    guild = interaction.guild
+    user = interaction.user
+    valid = False
+
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+
+    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+        valid = True
+
+    if "serverroles" in database:
+        for x in database["serverroles"]:
+            if database["serverroles"][x] >= 2:
+                myrole = discord.utils.get(interaction.guild.roles, name=x)
+                if myrole in user.roles:
+                    valid = True
+    
+    if valid == False:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+
+    if valid == True:
+
+        waitingid = waitingchannel.id
+        blueid = bluechannel.id
+        redid = redchannel.id
+
+        database["voicechannels"] = {}
+        database["voicechannels"]["waitingchannel"] = waitingid
+        database["voicechannels"]["redchannel"] = redid
+        database["voicechannels"]["bluechannel"] = blueid
+
+        with open(databasestring, "w") as outfile:
+            json.dump(database, outfile, indent = 4)
+
+        print(f"{waitingid}\n{blueid}\n{redid}")
+
+        await interaction.response.send_message("Voice channels configured!")
+
+
+@client.tree.command(name="headtohead", description="Shows your head to head records") # 1.1.1 support for new databases #
 @app_commands.describe(myuser = "Which user would you like to see?")
 async def headtohead(interaction: discord.Interaction, myuser: discord.User):
     userid = str(myuser.id)
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    
+    database = loaddatabase(interaction)
 
     if userid not in database:
         await interaction.response.send_message(f"No h2h data found for {interaction.user.name}", ephemeral=True)
@@ -1666,15 +1902,13 @@ async def headtohead(interaction: discord.Interaction, myuser: discord.User):
             await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-@client.tree.command(name="newseason", description="Start a new ranked season with optional full or partial resets.") # 1.1 added history tracking #
+@client.tree.command(name="newseason", description="Start a new ranked season with optional full or partial resets.") # 1.2.1 support for new databases #
 async def newseason(interaction: discord.Interaction):
     user = interaction.user
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
             valid = True
@@ -1687,10 +1921,10 @@ async def newseason(interaction: discord.Interaction):
                         valid = True
 
         if valid == True:
-            await interaction.response.send_message("", view=newseasonbuttons(user, guildstring))
+            await interaction.response.send_message("We recommend you create a **/backup** before continuing!", view=newseasonbuttons(user, databasestring))
 
 
-class newseasonbuttons(discord.ui.View):
+class newseasonbuttons(discord.ui.View): # 1.0 #
     def __init__(self, user, servername):
         super().__init__()
         self.user=user
@@ -1852,17 +2086,22 @@ class newseasonbuttons(discord.ui.View):
                     json.dump(database, outfile, indent=4)
 
 
-async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* formatting #
-    bigstring = "MMR Leaderboard:\n--------------------------------\n"
+async def leaderboardtext(position, databasestring, sorttype, guild): # ver 1.2 support for game name #
+    
+    with open(databasestring, 'r') as openfile:
+        database = json.load(openfile)
+    
+    title = "**MMR Leaderboard**"
+    if "gamedata" in database:
+        if "gamename" in database["gamedata"]:
+            title = "**" + database["gamedata"]["gamename"] + "**"
+    
+    bigstring = title + "\n--------------------------------\n"
     leftstring = ""
     middlestring = ""
     rightstring = ""
 
-    guild = client.get_guild(int(guildid))
-
-    guildstring = guildid + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    # guild = client.get_guild(int(guildid))
 
     if sorttype.lower() == "zsr":
         sortstring = "mmr"
@@ -1880,12 +2119,25 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
             database[x]["TrueSkillDelta"] = database[x]["TrueSkillMu"] - (3 * database[x]["TrueSkillSigma"])
 
     sorteddb = dict(
-        sorted(((k, v)
-        for k, v in database.items()
-        if sortstring in v and v.get("wins", 0) > 0),
-        key=lambda item: (item[1][sortstring], item[1]["wins"]),
-        reverse=True))
-            
+        sorted(
+            (
+                (k, v)
+                for k, v in database.items()
+                if (
+                    sortstring in v
+                    and isinstance(v[sortstring], (int, float))
+                    and (
+                        v[sortstring] >= 1
+                        or ("seasonwins" in v and "seasonlosses" in v and v["seasonwins"] + v["seasonlosses"] > 0)
+                        or (("seasonwins" not in v or "seasonlosses" not in v) and v.get("wins", 0) + v.get("losses", 0) > 0)
+                    )
+                )
+            ),
+            key=lambda item: (item[1][sortstring]),
+            reverse=True,
+        )
+    )
+
     count = 1
     for user in sorteddb:
         target = guild.get_member(int(user))
@@ -1897,8 +2149,19 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
                     name = target.name
                 # name = "name"
 
-                wins = database[user]["wins"]
-                loss = database[user]["losses"]
+                name = name.replace("_", "\x5c_")
+                name = name.replace("||", "\\||")
+                name = name.replace("*", "\\*")
+                name = name.replace("~~", "\\~~")
+
+                if "seasonwins" in database[user]:
+                    wins = database[user]["seasonwins"]
+                else:
+                    wins = database[user]["wins"]
+                if "seasonlosses" in database[user]:
+                    loss = database[user]["seasonlosses"]
+                else:
+                    loss = database[user]["losses"]
                 
                 if sorttype == "zsr":
                     mmr = database[user]["mmr"]
@@ -1908,20 +2171,26 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
                 if sorttype == "elo":
                     mmr = database[user]["Elo"]
 
+                tier2 = 250
+                tier3 = 500
+                tier4 = 750
+                tier5 = 1000
+                tier6 = 1250
+                tier7 = 1500
+                tier8 = 1750
+                tier9 = 2000
+                
                 if "gamedata" not in database:
                     database["gamedata"] = {}
-                if "mastertier" in database["gamedata"]:
-                    tier2 = database["gamedata"]["silvertier"]
-                    tier3 = database["gamedata"]["goldtier"]
-                    tier4 = database["gamedata"]["platinumtier"]
-                    tier5 = database["gamedata"]["diamondtier"]
-                    tier6 = database["gamedata"]["mastertier"]
-                else:
-                    tier2 = 200
-                    tier3 = 400
-                    tier4 = 600
-                    tier5 = 800
-                    tier6 = 1000
+                if "legendtier" in database["gamedata"]:
+                    tier2 = database["gamedata"]["bronzetier"]
+                    tier3 = database["gamedata"]["silvertier"]
+                    tier4 = database["gamedata"]["goldtier"]
+                    tier5 = database["gamedata"]["platinumtier"]
+                    tier6 = database["gamedata"]["diamondtier"]
+                    tier7 = database["gamedata"]["mastertier"]
+                    tier8 = database["gamedata"]["grandmastertier"]
+                    tier9 = database["gamedata"]["legendtier"]
 
                 if "gamedata" in database:
                     if "mmrtype" in database["gamedata"]:
@@ -1943,7 +2212,7 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
                 if defaulttype == "elo":
                     defaultmmr = database[user]["Elo"]
 
-                emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(guildstring)
+                emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6, emoji_7, emoji_8, emoji_9 = loademoji(databasestring)
 
                 emoji = emoji_1
                 if defaultmmr >= tier2:
@@ -1956,6 +2225,12 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
                     emoji = emoji_5
                 if defaultmmr >= tier6:
                     emoji = emoji_6
+                if defaultmmr >= tier7:
+                    emoji = emoji_7
+                if defaultmmr >= tier8:
+                    emoji = emoji_8
+                if defaultmmr >= tier9:
+                    emoji = emoji_9
 
                 if position <= count <= position +19:
                     mmrstring = str(mmr)
@@ -1974,192 +2249,35 @@ async def leaderboardtext(position, guildid, sorttype): # ver 1.06 fixed |* form
                     rightstring = rightstring + string + "\n"
                 count += 1
 
-    bigstring = bigstring.replace("_", "\x5c_")
-    bigstring = bigstring.replace("||", "\\||")
-    bigstring = bigstring.replace("*", "\\*")
-    bigstring = bigstring.replace("~~", "\\~~")
+    # print(bigstring)
 
-    rightstring = rightstring.replace("_", "\x5c_")
-    rightstring = rightstring.replace("||", "\\||")
-    rightstring = rightstring.replace("*", "\\*")
-    rightstring = rightstring.replace("~~", "\\~~")
+    # bigstring = bigstring.replace("_", "\x5c_")
+    # bigstring = bigstring.replace("||", "\\||")
+    # bigstring = bigstring.replace("*", "\\*")
+    # bigstring = bigstring.replace("~~", "\\~~")
+
+    # rightstring = rightstring.replace("_", "\x5c_")
+    # rightstring = rightstring.replace("||", "\\||")
+    # rightstring = rightstring.replace("*", "\\*")
+    # rightstring = rightstring.replace("~~", "\\~~")
 
     # print(bigstring)
 
-    return(bigstring, leftstring, middlestring, rightstring)
+    return(bigstring, leftstring, middlestring, rightstring, title)
 
 
-@client.tree.command(name="leaderboard", description="Show this server's leaderboard") # ver 1.03 added typing to remove error #
+@client.tree.command(name="leaderboard", description="Show this server's leaderboard") # ver 1.support for game name #
 async def leaderboard(interaction: discord.Interaction):
-    guildid = str(interaction.guild.id)
-    if guildid != "704052660520878181" or str(interaction.user.id) == "215277233638604800":
-        async with interaction.channel.typing():
-            pass
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
-        position = 1
-        leftstring = ""
-        middlestring = ""
-        rightstring = ""
+    async with interaction.channel.typing(): # bookmark # what is this? look at this later lmao
+        pass
 
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-        
-        if "gamedata" in database:
-            if "mmrtype" in database["gamedata"]:
-                if database["gamedata"]["mmrtype"].lower() == "elo":
-                    sorttype = "elo"
-                elif database["gamedata"]["mmrtype"].lower() == "trueskill":
-                    sorttype = "trueskill"
-                else:
-                    sorttype = "zsr"
-            else:
-                sorttype = "zsr"
-        else:
-            sorttype = "zsr"
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(position, guildid, sorttype)
-        ############################
-
-        desctext = "MMR Leaderboard"
-        embed = discord.Embed(
-            # description = desctext,
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.send_message(embed=embed, view=LeaderboardButtons(position, sorttype))
-
-
-class LeaderboardButtons(discord.ui.View):
-    def __init__(self, position, sorttype):
-        super().__init__(timeout=None)
-        self.position=position
-        self.sorttype=sorttype
-
-    @discord.ui.button(label="Previous", custom_id="previousbutton", style=discord.ButtonStyle.blurple)
-    async def PreviousButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position -= 20
-        if self.position < 1:
-            self.position = 1
-
-        guildid = str(interaction.guild.id)
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
-        ############################
-
-        embed = discord.Embed(
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype))
-
-
-    @discord.ui.button(label="Next", custom_id="nextbutton", style=discord.ButtonStyle.blurple)
-    async def NextButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position += 20
-
-        guildid = str(interaction.guild.id)
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
-        ############################
-
-        embed = discord.Embed(
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype))
-
-
-    @discord.ui.button(label="Sort by ZSR", custom_id="showzsr", style=discord.ButtonStyle.green)
-    async def showzsrButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = 1
-        self.sorttype = "zsr"
-
-        guildid = str(interaction.guild.id)
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
-        ############################
-
-        embed = discord.Embed(
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype))
-
-
-    @discord.ui.button(label="Sort by Elo", custom_id="showelo", style=discord.ButtonStyle.green)
-    async def showeloButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = 1
-        self.sorttype = "elo"
-
-        guildid = str(interaction.guild.id)
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
-        ############################
-
-        embed = discord.Embed(
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype))
-
-
-    @discord.ui.button(label="Sort by TrueSkill", custom_id="showtrueskill", style=discord.ButtonStyle.green)
-    async def showtrueskillButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = 1
-        self.sorttype = "trueskill"
-
-        guildid = str(interaction.guild.id)
-
-        ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
-        ############################
-
-        embed = discord.Embed(
-            title = "MMR Leaderboard"
-        )
-        embed.add_field(name="", value=leftstring, inline=True)
-        embed.add_field(name="", value=middlestring, inline=True)
-        embed.add_field(name="", value=rightstring, inline=True)
-
-        await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype))
-
-
-@client.tree.command(name="oldleaderboard", description="Show this server's leaderboard (in plain text)") # ver 1.03 added typing to remove error #
-async def oldleaderboard(interaction: discord.Interaction):
     position = 1
-    bigstring = ""
     leftstring = ""
     middlestring = ""
     rightstring = ""
-    count = 1
-    guildid = str(interaction.guild.id)
-    
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
     
     if "gamedata" in database:
         if "mmrtype" in database["gamedata"]:
@@ -2175,18 +2293,172 @@ async def oldleaderboard(interaction: discord.Interaction):
         sorttype = "zsr"
 
     ############################
-    bigstring, leftstring, middlestring, rightstring = await leaderboardtext(position, guildid, sorttype)
+    bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(position, databasestring, sorttype, interaction.guild)
     ############################
 
-    # await interaction.response.send_message(f"MMR Leaderboard:\n--------------------------------")
-    await interaction.response.send_message(f"{bigstring}", view=OLBButtons(position, sorttype))
+    embed = discord.Embed(
+        # description = desctext,
+        title = mytitle
+    )
+    embed.add_field(name="", value=leftstring, inline=True)
+    embed.add_field(name="", value=middlestring, inline=True)
+    embed.add_field(name="", value=rightstring, inline=True)
+
+    await interaction.response.send_message(embed=embed, view=LeaderboardButtons(position, sorttype, databasestring))
 
 
-class OLBButtons(discord.ui.View):
-    def __init__(self, position, sorttype):
+class LeaderboardButtons(discord.ui.View): # 1.3 support for game name #
+    def __init__(self, position, sorttype, databasestring):
         super().__init__(timeout=None)
         self.position=position
         self.sorttype=sorttype
+        self.databasestring=databasestring
+
+    @discord.ui.button(label="Previous", custom_id="previousbutton", style=discord.ButtonStyle.blurple)
+    async def PreviousButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position -= 20
+        if self.position < 1:
+            self.position = 1
+
+        ############################
+        bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
+        ############################
+
+        embed = discord.Embed(
+            # description = desctext,
+            title = mytitle
+        )
+        embed.add_field(name="", value=leftstring, inline=True)
+        embed.add_field(name="", value=middlestring, inline=True)
+        embed.add_field(name="", value=rightstring, inline=True)
+
+        # await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype, self.databasestring))
+        await interaction.response.edit_message(embed=embed)
+
+
+    @discord.ui.button(label="Next", custom_id="nextbutton", style=discord.ButtonStyle.blurple)
+    async def NextButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position += 20
+
+        ############################
+        bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
+        ############################
+
+        embed = discord.Embed(
+            # description = desctext,
+            title = mytitle
+        )
+        embed.add_field(name="", value=leftstring, inline=True)
+        embed.add_field(name="", value=middlestring, inline=True)
+        embed.add_field(name="", value=rightstring, inline=True)
+
+        # await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype, self.databasestring))
+        await interaction.response.edit_message(embed=embed)
+
+
+    @discord.ui.button(label="Sort by ZSR", custom_id="showzsr", style=discord.ButtonStyle.green)
+    async def showzsrButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = 1
+        self.sorttype = "zsr"
+
+        ############################
+        bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
+        ############################
+
+        embed = discord.Embed(
+            # description = desctext,
+            title = mytitle
+        )
+        embed.add_field(name="", value=leftstring, inline=True)
+        embed.add_field(name="", value=middlestring, inline=True)
+        embed.add_field(name="", value=rightstring, inline=True)
+
+        # await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype, self.databasestring))
+        await interaction.response.edit_message(embed=embed)
+
+
+    @discord.ui.button(label="Sort by Elo", custom_id="showelo", style=discord.ButtonStyle.green)
+    async def showeloButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = 1
+        self.sorttype = "elo"
+
+        ############################
+        bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
+        ############################
+
+        embed = discord.Embed(
+            # description = desctext,
+            title = mytitle
+        )
+        embed.add_field(name="", value=leftstring, inline=True)
+        embed.add_field(name="", value=middlestring, inline=True)
+        embed.add_field(name="", value=rightstring, inline=True)
+
+        # await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype, self.databasestring))
+        await interaction.response.edit_message(embed=embed)
+
+
+    @discord.ui.button(label="Sort by TrueSkill", custom_id="showtrueskill", style=discord.ButtonStyle.green)
+    async def showtrueskillButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = 1
+        self.sorttype = "trueskill"
+
+        ############################
+        bigstring, leftstring, middlestring, rightstring, mytitle = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
+        ############################
+
+        embed = discord.Embed(
+            # description = desctext,
+            title = mytitle
+        )
+        embed.add_field(name="", value=leftstring, inline=True)
+        embed.add_field(name="", value=middlestring, inline=True)
+        embed.add_field(name="", value=rightstring, inline=True)
+
+        # await interaction.response.edit_message(embed=embed, view=LeaderboardButtons(self.position, self.sorttype, self.databasestring))
+        await interaction.response.edit_message(embed=embed)
+
+
+@client.tree.command(name="oldleaderboard", description="Show this server's leaderboard (in plain text)") # ver 1.5 support for game name #
+async def oldleaderboard(interaction: discord.Interaction):
+    position = 1
+    bigstring = ""
+    leftstring = ""
+    middlestring = ""
+    rightstring = ""
+    count = 1
+    guildid = str(interaction.guild.id)
+    
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+    
+    if "gamedata" in database:
+        if "mmrtype" in database["gamedata"]:
+            if database["gamedata"]["mmrtype"].lower() == "elo":
+                sorttype = "elo"
+            elif database["gamedata"]["mmrtype"].lower() == "trueskill":
+                sorttype = "trueskill"
+            else:
+                sorttype = "zsr"
+        else:
+            sorttype = "zsr"
+    else:
+        sorttype = "zsr"
+
+    ############################
+    bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(position, databasestring, sorttype, interaction.guild)
+    ############################
+
+    # await interaction.response.send_message(f"MMR Leaderboard:\n--------------------------------")
+    await interaction.response.send_message(f"{bigstring}", view=OLBButtons(position, sorttype, databasestring))
+
+
+class OLBButtons(discord.ui.View): # ver 1.5 support for game name #
+    def __init__(self, position, sorttype, databasestring):
+        super().__init__(timeout=None)
+        self.position=position
+        self.sorttype=sorttype
+        self.databasestring=databasestring
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.blurple)
     async def PreviousButton(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2194,10 +2466,8 @@ class OLBButtons(discord.ui.View):
         if self.position < 0:
             self.position = 1
 
-        guildid = str(interaction.guild.id)
-
         ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
+        bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
         ############################
 
         await interaction.response.edit_message(content=f"{bigstring}")
@@ -2207,10 +2477,8 @@ class OLBButtons(discord.ui.View):
     async def NextButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.position += 20
 
-        guildid = str(interaction.guild.id)
-
         ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
+        bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
         ############################
 
         await interaction.response.edit_message(content=f"{bigstring}")
@@ -2221,10 +2489,8 @@ class OLBButtons(discord.ui.View):
         self.position = 1
         self.sorttype = "zsr"
 
-        guildid = str(interaction.guild.id)
-
         ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
+        bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
         ############################
 
         await interaction.response.edit_message(content=f"{bigstring}")
@@ -2235,10 +2501,8 @@ class OLBButtons(discord.ui.View):
         self.position = 1
         self.sorttype = "elo"
 
-        guildid = str(interaction.guild.id)
-
         ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
+        bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
         ############################
 
         await interaction.response.edit_message(content=f"{bigstring}")
@@ -2249,18 +2513,14 @@ class OLBButtons(discord.ui.View):
         self.position = 1
         self.sorttype = "trueskill"
 
-        guildname = str(interaction.guild.id)
-
-        guildid = str(interaction.guild.id)
-
         ############################
-        bigstring, leftstring, middlestring, rightstring = await leaderboardtext(self.position, guildid, self.sorttype)
+        bigstring, leftstring, middlestring, rightstring, title = await leaderboardtext(self.position, self.databasestring, self.sorttype, interaction.guild)
         ############################
 
         await interaction.response.edit_message(content=f"{bigstring}")
 
 
-@client.tree.command(name="undorank", description="Undoes the most recent game for a user") # 1.1 allows multiple users # 
+@client.tree.command(name="undorank", description="Undoes the most recent game for a user") # 1.2.1 support for new databases # 
 @app_commands.describe(user1 = "Which user would you like to undo their last game?")
 @app_commands.describe(user2 = "Which user would you like to undo their last game?")
 @app_commands.describe(user3 = "Which user would you like to undo their last game?")
@@ -2274,13 +2534,10 @@ class OLBButtons(discord.ui.View):
 async def undorank(interaction: discord.Interaction, user1: discord.User, user2: discord.User = None, user3: discord.User = None, user4: discord.User = None, user5: discord.User = None, user6: discord.User = None, user7: discord.User = None, user8: discord.User = None, user9: discord.User = None, user0: discord.User = None):
     user = interaction.user
     
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-    undostring = guildname + "undo.json"
-    with open(undostring, 'r') as openfile:
-        undodatabase = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+    undodatabase = loadundodatabase(interaction)
+    undostring = getundostring(interaction)
 
     if "serverroles" not in database:
         database["serverroles"] = {}
@@ -2309,22 +2566,19 @@ async def undorank(interaction: discord.Interaction, user1: discord.User, user2:
                     await interaction.response.send_message(f"Error: target not in undo database", ephemeral=True)
                     return
 
-        with open(guildstring, "w") as outfile:
+        with open(databasestring, "w") as outfile:
             json.dump(database, outfile, indent = 4)
         await interaction.channel.send(successstring[:-2])
-        await interaction.channel.send("Note: This command only remembers one game per user. Run this command for each teammate/opponent as necessary. Undo database does not save 'set' commands.")
+        await interaction.channel.send("Note: This command only remembers one game per user. Undo database does not remember 'set' commands.")
 
         
     else:
         await interaction.response.send_message(f"You dont have permission to use this command", ephemeral=True)
 
 
-@client.tree.command(name="server", description="Show some info about this server") # Slash command 0.1
+@client.tree.command(name="server", description="Show some info about this server") # 1.1.1 support for new databases, display server name properly, display game #
 async def server(interaction: discord.Interaction):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
 
     sorteddb = dict(
         sorted(
@@ -2367,22 +2621,25 @@ async def server(interaction: discord.Interaction):
     if totalusers > 0:
         serveraveragemmr = math.ceil(totalmmr / totalusers)
 
-    if totalusers == 0 or serveraveragemmr < 100:
-        adjustedmmr = 100
-    else:
-        adjustedmmr = serveraveragemmr
+    # if totalusers == 0 or serveraveragemmr < 100:
+    #     adjustedmmr = 100
+    # else:
+    #     adjustedmmr = serveraveragemmr
 
     if "season" in database["gamedata"]:
         currentseason = database["gamedata"]["season"]
     else:
         currentseason = 0
 
-    await interaction.response.send_message(f"**{guildname}**:\nTotal users: {countusers}\nTotal games played: {totalgames}\nUsers >=20 games: {sumusers}\nAverage MMR <500 Uncertainty: {serveraveragemmr}\nAdjusted avg mmr: {adjustedmmr}\nCurrent Season: {currentseason}")
+    gamename = ""
+    if "gamedata" in database:
+        if "gamename" in database["gamedata"]:
+            gamename = "\n**" + database["gamedata"]["gamename"] + "**"
+
+    await interaction.response.send_message(f"**{interaction.guild.name}**{gamename}\nTotal users: {countusers}\nTotal games played: {totalgames}\nUsers >=20 games: {sumusers}\nAverage MMR <500 Uncertainty: {serveraveragemmr}\nCurrent Season: {currentseason}")
 
 
-async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no change #
-    guildstring = str(guild.id) + ".json"
-
+async def showmebase(userid, database, databasestring, guild): # 1.6 support for new databases #
     if "gamedata" in database:
         if "mmrtype" in database["gamedata"]:
             if database["gamedata"]["mmrtype"].lower() == "elo":
@@ -2448,20 +2705,26 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
         trueskilldelta = round(trueskilldelta * 1000)/1000
         peakTS = round(peakTS * 1000)/1000
 
+        tier2 = 250
+        tier3 = 500
+        tier4 = 750
+        tier5 = 1000
+        tier6 = 1250
+        tier7 = 1500
+        tier8 = 1750
+        tier9 = 2000
+        
         if "gamedata" not in database:
             database["gamedata"] = {}
-        if "mastertier" in database["gamedata"]:
-            tier2 = database["gamedata"]["silvertier"]
-            tier3 = database["gamedata"]["goldtier"]
-            tier4 = database["gamedata"]["platinumtier"]
-            tier5 = database["gamedata"]["diamondtier"]
-            tier6 = database["gamedata"]["mastertier"]
-        else:
-            tier2 = 200
-            tier3 = 400
-            tier4 = 600
-            tier5 = 800
-            tier6 = 1000
+        if "legendtier" in database["gamedata"]:
+            tier2 = database["gamedata"]["bronzetier"]
+            tier3 = database["gamedata"]["silvertier"]
+            tier4 = database["gamedata"]["goldtier"]
+            tier5 = database["gamedata"]["platinumtier"]
+            tier6 = database["gamedata"]["diamondtier"]
+            tier7 = database["gamedata"]["mastertier"]
+            tier8 = database["gamedata"]["grandmastertier"]
+            tier9 = database["gamedata"]["legendtier"]
 
         if "gamedata" in database:
             if "mmrtype" in database["gamedata"]:
@@ -2483,19 +2746,25 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
         if defaulttype == "elo":
             defaultmmr = database[userid]["Elo"]
 
-        emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(guildstring)
+        emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6, emoji_7, emoji_8, emoji_9 = loademoji(databasestring)
 
         emoji = emoji_1
-        if defaultmmr >= tier2:
+        if mymmr >= tier2:
             emoji = emoji_2
-        if defaultmmr >= tier3:
+        if mymmr >= tier3:
             emoji = emoji_3
-        if defaultmmr >= tier4:
+        if mymmr >= tier4:
             emoji = emoji_4
-        if defaultmmr >= tier5:
+        if mymmr >= tier5:
             emoji = emoji_5
-        if defaultmmr >= tier6:
+        if mymmr >= tier6:
             emoji = emoji_6
+        if mymmr >= tier7:
+            emoji = emoji_7
+        if mymmr >= tier8:
+            emoji = emoji_8
+        if mymmr >= tier9:
+            emoji = emoji_9
 
         if sorttype.lower() == "zsr":
             sortstring = "mmr"
@@ -2576,35 +2845,11 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
             black = (0,0,0)
 
             backgroundcolor = (25,25,25)
-            wincolor = (0,127,255)
+            wincolor = (60,190,255)
             losscolor = (255,63,0)
 
             img = Image.new("RGB", (800,400), backgroundcolor)
             draw = ImageDraw.Draw(img)
-
-            markA = 50
-            markB = 100
-            markC = 200
-            markD = 300
-            markE = 400
-            markF = 500
-            markG = 1000
-            markH = 2000
-            markI = 3000
-
-            tier2 = 200
-            tier3 = 400
-            tier4 = 600
-            tier5 = 800
-            tier6 = 1000
-
-            if "gamedata" in database:
-                if "mastertier" in database["gamedata"]:
-                    tier2 = database["gamedata"]["silvertier"]
-                    tier3 = database["gamedata"]["goldtier"]
-                    tier4 = database["gamedata"]["platinumtier"]
-                    tier5 = database["gamedata"]["diamondtier"]
-                    tier6 = database["gamedata"]["mastertier"]
 
             imagescale = max(((max(serverhighest, userpeak) + 100) / 400), 0.2)
 
@@ -2620,16 +2865,19 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
             tier4 /= imagescale
             tier5 /= imagescale
             tier6 /= imagescale
+            tier7 /= imagescale
+            tier8 /= imagescale
+            tier9 /= imagescale
 
-            markA /= imagescale
-            markB /= imagescale
-            markC /= imagescale
-            markD /= imagescale
-            markE /= imagescale
-            markF /= imagescale
-            markG /= imagescale
-            markH /= imagescale
-            markI /= imagescale
+            markA = 50 / imagescale
+            markB = 100 / imagescale
+            markC = 200 / imagescale
+            markD = 300 / imagescale
+            markE = 400 / imagescale
+            markF = 500 / imagescale
+            markG = 1000 / imagescale
+            markH = 2000 / imagescale
+            markI = 3000 / imagescale
 
             draw.line(((0, 400-displayserverhighest), (800, 400-displayserverhighest)), fill=orange)
             draw.line(((0, 400-displayuserpeak), (800, 400-displayuserpeak)), fill=white)
@@ -2649,12 +2897,18 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
             draw.line(((770, 400-tier4), (800, 400-tier4)), fill=gray)
             draw.line(((770, 400-tier5), (800, 400-tier5)), fill=gray)
             draw.line(((770, 400-tier6), (800, 400-tier6)), fill=gray)
+            draw.line(((770, 400-tier7), (800, 400-tier7)), fill=gray)
+            draw.line(((770, 400-tier8), (800, 400-tier8)), fill=gray)
+            draw.line(((770, 400-tier9), (800, 400-tier9)), fill=gray)
 
-            draw.text((750, 386-tier2), "Silver", fill=(255, 255, 255, 255))
-            draw.text((750, 386-tier3), "Gold", fill=(255, 255, 0, 255))
-            draw.text((750, 386-tier4), "Platinum", fill=(0, 255, 128, 255))
-            draw.text((750, 386-tier5), "Diamond", fill=(0, 128, 255, 255))
-            draw.text((750, 386-tier6), "Master", fill=(255, 63, 0, 255))
+            draw.text((720, 386-tier2), "Bronze", fill=(200, 150, 100, 255))
+            draw.text((720, 386-tier3), "Silver", fill=(200, 200, 200, 255))
+            draw.text((720, 386-tier4), "Gold", fill=(255, 255, 0, 255))
+            draw.text((720, 386-tier5), "Platinum", fill=(0, 255, 128, 255))
+            draw.text((720, 386-tier6), "Diamond", fill=(0, 128, 255, 255))
+            draw.text((720, 386-tier7), "Master", fill=(255, 63, 0, 255))
+            draw.text((720, 386-tier8), "Grandmaster", fill=(255, 0, 255, 255))
+            draw.text((720, 386-tier9), "Legend", fill=(255, 255, 255, 255))
 
             draw.text((0, 386-markA), "50", fill=(255, 255, 255, 255))
             draw.text((0, 386-markB), "100", fill=(255, 255, 255, 255))
@@ -2666,11 +2920,11 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
             draw.text((0, 386-markH), "2000", fill=(255, 255, 255, 255))
             draw.text((0, 386-markI), "3000", fill=(255, 255, 255, 255))
 
-            draw.text((6, 6), name, fill=(255, 255, 255, 255))
-            draw.text((6, 20), guild.name, fill=(255, 255, 255, 255))
+            draw.text((66, 6), name, fill=(255, 255, 255, 255))
+            draw.text((66, 20), guild.name, fill=(255, 255, 255, 255))
 
-            draw.text((210, 386-displayserverhighest), f"Server Highest: {round(serverhighest, 1)}", fill=(255, 255, 255, 255))
-            draw.text((90, 386-displayuserpeak), f"My Peak: {round(userpeak, 1)}", fill=(255, 255, 255, 255))
+            draw.text((450, 386-displayserverhighest), f"Server Highest: {round(serverhighest, 1)}", fill=(255, 255, 255, 255))
+            draw.text((300, 386-displayuserpeak), f"My Peak: {round(userpeak, 1)}", fill=(255, 255, 255, 255))
 
 
             for x in range(len(scores)-1):
@@ -2707,44 +2961,39 @@ async def showtextbase(userid, database, guild): # 1.4.4.2 fixed color on no cha
         # return text
 
 
-@client.tree.command(name="showme", description="Show your detailed stats") # 1.5 shows users without games #
+@client.tree.command(name="showme", description="Show your detailed stats") # 1.7 bugfix #
 async def showme(interaction: discord.Interaction):
     userid = str(interaction.user.id)
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     if userid not in database:
         database[userid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
 
-    showtext = await showtextbase(userid, database, interaction.guild)
+    showtext = await showmebase(userid, database, databasestring, interaction.guild)
     mymessage = await interaction.response.send_message(embed=showtext)
 
 
-@client.tree.command(name="show", description="Show detailed stats of another user") # 1.5 shows users without games #
+@client.tree.command(name="show", description="Show detailed stats of another user") # 1.7 bugfix #
 @app_commands.describe(myuser = "Which user would you like to see?")
 async def show(interaction: discord.Interaction, myuser: discord.User):
     userid = str(myuser.id)
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     if userid not in database:
         database[userid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
 
-    showtext = await showtextbase(userid, database, interaction.guild)
+    showtext = await showmebase(userid, database, databasestring, interaction.guild)
     mymessage = await interaction.response.send_message(embed=showtext)
 
 
-@client.tree.command(name="forcewin", description="Submit a game with winners and losers and force submit the results") # 1.0 #
+@client.tree.command(name="forcewin", description="Submit a game with winners and losers and force submit the results") # 1.1.1 support for new databases #
 async def forcewin(interaction: discord.Interaction):
     user = interaction.user
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
     
     if "serverroles" not in database:
         database["serverroles"] = {}
@@ -2767,7 +3016,7 @@ async def forcewin(interaction: discord.Interaction):
         await interaction.response.send_message("Select winners, then losers", view=forcewinuserselect(winners, losers), ephemeral=True)
 
 
-class forcewinuserselect(discord.ui.View): # 1.1 uses embeds #
+class forcewinuserselect(discord.ui.View): # 1.2.1 check for new database #
     def __init__(self, winners, losers):
         super().__init__(timeout=None)
         self.winners = []
@@ -2806,18 +3055,24 @@ class forcewinuserselect(discord.ui.View): # 1.1 uses embeds #
         for x in self.losers:
             loserlist.append(str(x.id))
 
-        guildid = str(interaction.guild.id)
-        guildstring = guildid + ".json"
-        undostring = guildid + "undo.json"
-
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        try:
+            categoryid = interaction.channel.category.id
+            databasestring = "cat" + str(categoryid) + ".json"
+            undostring = "cat" + str(categoryid) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
+        except:
+            guildname = str(interaction.guild.id)
+            databasestring = guildname + ".json"
+            undostring = str(interaction.guild.id) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
 
         members = winnerlist + loserlist
         for x in members:
             if x not in database:
                 database[x] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent = 4)
             if "RankBan" in database[x]:
                 if database[x]["RankBan"] == "True":
@@ -2828,20 +3083,25 @@ class forcewinuserselect(discord.ui.View): # 1.1 uses embeds #
         await interaction.delete_original_response()
 
         if valid == True:
-            embed = await rankcalc(interaction, winnerlist, loserlist, guildstring, undostring)
-            await interaction.channel.send(embed=embed, view=None)
-        
+            embed = await rankcalc(interaction, winnerlist, loserlist, databasestring, undostring)
 
-@client.tree.command(name="idwin", description="Submit a game with winners and losers using their discord id and force submit the results") # 1.1 uses embeds #
+            if "resultschannel" in database:
+                targetchannel = await interaction.guild.fetch_channel(int(database["resultschannel"]))
+            else:
+                targetchannel = interaction.channel
+ 
+            await targetchannel.send(embed=embed, view=None)
+   
+
+@client.tree.command(name="idwin", description="Submit a game with winners and losers using their discord id and force submit the results") # 1.2.1 support for new databases #
 @app_commands.describe(winnertext = "input the id(s) of the winner(s) seperated by spaces")
 @app_commands.describe(losertext = "input the id(s) of the winner(s) seperated by spaces")
 async def idwin(interaction: discord.Interaction, winnertext: str, losertext: str):
     user = interaction.user
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    undostring = guildname + "undo.json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+    undodatabase = loadundodatabase(interaction)
+    undostring = getundostring(interaction)
 
     errorstring = ""
     valid = False
@@ -2862,12 +3122,12 @@ async def idwin(interaction: discord.Interaction, winnertext: str, losertext: st
         winners = winnertext.split()
         losers = losertext.split()
 
-        with open(guildstring, 'r') as openfile:
+        with open(databasestring, 'r') as openfile:
             database = json.load(openfile)
 
         members = winners + losers
         for x in members:
-            if not all(char in "0123456789" for char in x):
+            if not all(char in "0123456789" for char in x): # bookmark
                 valid = False
                 errorstring = "Game not submitted. One or more IDs are invalid."
             
@@ -2875,7 +3135,7 @@ async def idwin(interaction: discord.Interaction, winnertext: str, losertext: st
             for x in members:
                 if x not in database:
                     database[x] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
-                    with open(guildstring, "w") as outfile:
+                    with open(databasestring, "w") as outfile:
                         json.dump(database, outfile, indent = 4)
                 if "RankBan" in database[x]:
                     if database[x]["RankBan"] == "True":
@@ -2884,8 +3144,12 @@ async def idwin(interaction: discord.Interaction, winnertext: str, losertext: st
 
             if valid == True:
                 if len(winners) >= 1 and len(losers) >= 1:
-                    embed = await rankcalc(interaction, winners, losers, guildstring, undostring)
-                    await interaction.channel.send(embed=embed, view=None)
+                    embed = await rankcalc(interaction, winners, losers, databasestring, undostring)
+                    if "resultschannel" in database:
+                        targetchannel = await interaction.guild.fetch_channel(database["resultschannel"])
+                        await targetchannel.send(embed=embed, view=None)
+                    else:
+                        await interaction.channel.send(embed=embed, view=None)
                 
                 else:
                     errorstring = errorstring + "\nGame not submitted. You need at least one winner and loser."
@@ -2895,20 +3159,15 @@ async def idwin(interaction: discord.Interaction, winnertext: str, losertext: st
         await interaction.response.send_message(errorstring, ephemeral=True)
 
 
-@client.tree.command(name="win", description="Submit a game with winners and losers") # Slash command 0.1
-async def win(interaction: discord.Interaction):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-        
+@client.tree.command(name="win", description="Submit a game with winners and losers") # 1.1.1 support for new databases #
+async def win(interaction: discord.Interaction):        
     winners = []
     losers = []
 
     await interaction.response.send_message("Select winners, then losers:", view=winuserselect(winners, losers), ephemeral=True)
 
 
-class winuserselect(discord.ui.View): # 1.1 uses embeds #
+class winuserselect(discord.ui.View): # 1.2.1 support for new databases #
     def __init__(self, winners, losers):
         super().__init__(timeout=None)
         self.winners = []
@@ -2948,18 +3207,18 @@ class winuserselect(discord.ui.View): # 1.1 uses embeds #
         for x in self.losers:
             loserlist.append(str(x.id))
 
-        guildid = str(interaction.guild.id)
-        guildstring = guildid + ".json"
-        undostring = guildid + "undo.json"
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
+        undostring = getundostring(interaction)
 
-        with open(guildstring, 'r') as openfile:
+        with open(databasestring, 'r') as openfile:
             database = json.load(openfile)
 
         members = winnerlist + loserlist
         for x in members:
             if x not in database:
                 database[x] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
-                with open(guildstring, "w") as outfile:
+                with open(databasestring, "w") as outfile:
                     json.dump(database, outfile, indent = 4)
             if "RankBan" in database[x]:
                 if database[x]["RankBan"] == "True":
@@ -3001,21 +3260,19 @@ class winuserselect(discord.ui.View): # 1.1 uses embeds #
             for x in loserlist:
                 loseratstring = loseratstring + "<@" + x + "> "
 
-
-
             tempstring = "Match reported!\nIt is reported that\n" + winneratstring + "\nwon against\n" + loseratstring + "\n" + oppname + "'s team, do you confirm this result?"
             tempstring = tempstring.replace("_", "\x5c_")
-            await interaction.channel.send(tempstring, view=ReportButtons("empty", oppteam, winnerlist, loserlist, guildstring, undostring))
+            await interaction.channel.send(tempstring, view=ReportButtons("empty", oppteam, winnerlist, loserlist, databasestring, undostring))
         
         
-class ReportButtons(discord.ui.View):
-    def __init__(self, response, oppteam, winners, losers, guildstring, undostring):
+class ReportButtons(discord.ui.View): # 1.2 deletes message properly
+    def __init__(self, response, oppteam, winners, losers, databasestring, undostring):
         super().__init__(timeout=None)
         self.response=response
         self.oppteam=oppteam
         self.winners=winners
         self.losers=losers
-        self.guildstring=guildstring
+        self.databasestring=databasestring
         self.undostring=undostring
 
     @discord.ui.button(label="Submit", style=discord.ButtonStyle.green)
@@ -3023,8 +3280,16 @@ class ReportButtons(discord.ui.View):
         if str(interaction.user.id) in self.oppteam:
             if self.response == "empty":
                 self.response = "Yes"
-                embed = await rankcalc(interaction, self.winners, self.losers, self.guildstring, self.undostring)
-                await interaction.response.edit_message(embed=embed, content=None, view=None)
+                embed = await rankcalc(interaction, self.winners, self.losers, self.databasestring, self.undostring)
+                with open(self.databasestring, 'r') as openfile:
+                    database = json.load(openfile)
+
+                if "resultschannel" in database:
+                    targetchannel = await interaction.guild.fetch_channel(database["resultschannel"])
+                    await interaction.message.delete()
+                    await targetchannel.send(embed=embed, view=None)
+                else:
+                    await interaction.response.edit_message(embed=embed, content=None, view=None)
         if str(interaction.user.id) not in self.oppteam:
             pass
 
@@ -3046,10 +3311,18 @@ class ReportButtons(discord.ui.View):
 
     @discord.ui.button(label="Staff Override: Cancel", style=discord.ButtonStyle.gray)
     async def OverrideAButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        try:
+            categoryid = interaction.channel.category.id
+            databasestring = "cat" + str(categoryid) + ".json"
+            undostring = "cat" + str(categoryid) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
+        except:
+            guildname = str(interaction.guild.id)
+            databasestring = guildname + ".json"
+            undostring = str(interaction.guild.id) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
 
         valid = False
 
@@ -3078,7 +3351,7 @@ class ReportButtons(discord.ui.View):
                 await interaction.response.edit_message(content=string, view=None)
 
 
-@client.tree.command(name="queue", description="Start a matchmaking queue") # 1.3 send message as response to avoid error #
+@client.tree.command(name="queue", description="Start a matchmaking queue") # 1.4.1 support for new databases #
 @app_commands.describe(size = "how many players per game?")
 @app_commands.describe(sbmm = "True = Enable skill based matchmaking / False = Full random matchmaking")
 async def queue(interaction: discord.Interaction, size: int, sbmm: bool):
@@ -3086,10 +3359,8 @@ async def queue(interaction: discord.Interaction, size: int, sbmm: bool):
     range = "None"
     number = 1
     valid = False
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    
+    database = loaddatabase(interaction)
 
     if "serverroles" in database:
         for x in database["serverroles"]:
@@ -3111,7 +3382,7 @@ async def queue(interaction: discord.Interaction, size: int, sbmm: bool):
             await interaction.response.send_message(f"<a:rgb:1319062935057727511>**Queue:** *(size: {size})* *(Members in queue: **{len(userlist)}**) (SBMM: {sbmm})*<a:rgb:1319062935057727511>", view=NewQueueButtons(size, range, userlist, number, sbmm))
 
 
-class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
+class NewQueueButtons(discord.ui.View): # 1.7 option for match found channel #
     def __init__(self, size, range, userlist, number, sbmm):
         super().__init__(timeout=None)
         self.size = size
@@ -3126,17 +3397,16 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
         # queuebutton = interaction.message
         # mymessage = await interaction.channel.fetch_message(queuebutton.id)
 
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        undostring = str(interaction.guild.id) + "undo" + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        guild = interaction.guild
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
+        undostring = getundostring(interaction)
 
         newuser = interaction.user
         newid = str(newuser.id)
 
         if newid not in database:
-            database[newid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000, "Elo": findstartingelo(guildstring), "TrueSkillMu": 25, "TrueSkillSigma": 8.333}
+            database[newid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000, "Elo": findstartingelo(databasestring), "TrueSkillMu": 25, "TrueSkillSigma": 8.333}
 
         if newid in database:
             if "streak" not in database[newid]:
@@ -3144,7 +3414,7 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
             if "uncertainty" not in database[newid]:
                 database[newid]["uncertainty"] = 1000
 
-        with open(guildstring, "w") as outfile:
+        with open(databasestring, "w") as outfile:
             json.dump(database, outfile, indent = 4)
 
         if "RankBan" in database[newid]:
@@ -3154,25 +3424,37 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
         if "RankBan" not in database[newid] or database[newid]["RankBan"] == "False":
             if newid not in self.userlist:
                 
-                mymmr = database[newid]["mmr"] + (database[newid]["uncertainty"] / 10)
+                mmrtype = "zsr"
+                adjustedmmr = None
+                actualmmr = None
                 if "gamedata" in database:
                     if "mmrtype" in database["gamedata"]:
                         if database["gamedata"]["mmrtype"].lower() == "elo":
-                            mymmr = database[newid]["Elo"]
+                            mmrtype = "elo"
+                            adjustedmmr = database[newid]["Elo"]
+                            actualmmr = database[newid]["Elo"]
                         elif database["gamedata"]["mmrtype"].lower() == "trueskill":
-                            mymmr = (database[newid]["TrueSkillMu"] - (1.5 * database[newid]["TrueSkillSigma"])) * 20
+                            mmrtype = "trueskill"
+                            adjustedmmr = (database[newid]["TrueSkillMu"] - (1.5 * database[newid]["TrueSkillSigma"])) # * 20
+                            actualmmr = database[newid]["TrueSkillMu"]
+                print(mmrtype)
+
+                if adjustedmmr is None:
+                    adjustedmmr = database[newid]["mmr"] + (database[newid]["uncertainty"] / 10)
+                    actualmmr = database[newid]["mmr"]
 
                 if self.sbmm == True:
                     try:
-                        mymmr += random.randint(0,100)
+                        # mymmr += random.randint(0,100)
+                        pass
                     except:
                         print(f"Couldnt add random to mmr for some reason")
                 else:
                     mymmr = random.randint(1,200)
 
                 name = interaction.user.name
-                self.userlist[newid] = {"Time": 0, "Name": name, "mmr": mymmr}
-                await asyncio.sleep(1)
+                self.userlist[newid] = {"Time": 0, "Name": name, "adjustedmmr": adjustedmmr, "actualmmr": actualmmr}
+                # await asyncio.sleep(1) # ?
                 if newid in self.userlist:
                     await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(size: {self.size})* *(Members in queue: **{len(self.userlist)}**) (SBMM: {self.sbmm})*<a:rgb:1319062935057727511>", view=NewQueueButtons(self.size, self.range, self.userlist, self.number, self.sbmm))
                     await interaction.followup.send(content="You joined queue", ephemeral=True)
@@ -3183,7 +3465,7 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                 printedlist = [printguildname]
                 for x in self.userlist:
                     name = self.userlist[x]["Name"]
-                    mmr = self.userlist[x]["mmr"]
+                    mmr = self.userlist[x]["actualmmr"]
                     time = self.userlist[x]["Time"]
                     printedlist.append([name, x, mmr, time])
                 # print(printedlist)
@@ -3229,7 +3511,7 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                 name = self.userlist[x]["Name"]
 
                 try:
-                    mmr = self.userlist[x]["mmr"]
+                    mmr = self.userlist[x]["actualmmr"]
                 except:
                     mmr = 1
                     print(f"JoinQueueButton, MMR error for user {name} {x}")
@@ -3244,12 +3526,12 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
 
                 if half == 1:
 
-                    mymmr = self.userlist[newid]["mmr"]
+                    mymmr = self.userlist[newid]["adjustedmmr"]
 
                     for x in self.userlist:
                         if x != newid:
                             try:
-                                mmr = self.userlist[x]["mmr"]
+                                mmr = self.userlist[x]["adjustedmmr"]
                             except:
                                 mmr = 2
                             difference = abs(mmr - mymmr) - (self.userlist[x]["Time"])
@@ -3272,16 +3554,17 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                 if half >= 2:
                     targetsum = 0
                     for x in self.userlist:
-                        mmr = self.userlist[x]["mmr"]
+                        mmr = self.userlist[x]["adjustedmmr"]
                         targetsum += mmr
 
-                    targetsum /= half
+                    targetsum /= 2
+                    print(targetsum)
 
                     bestgroup = None
                     for group in combinations(self.userlist, half):
                         groupsum = 0
                         for x in group:
-                            mmr = self.userlist[x]["mmr"]
+                            mmr = self.userlist[x]["adjustedmmr"]
                             groupsum += mmr
 
                         diff = abs(targetsum - groupsum)
@@ -3302,7 +3585,7 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                     for group in combinations(otherusers, half):
                         groupsum = 0
                         for x in group:
-                            mmr = self.userlist[x]["mmr"]
+                            mmr = self.userlist[x]["adjustedmmr"]
                             groupsum += mmr
 
                         diff = abs(bestmmr - groupsum)
@@ -3333,23 +3616,63 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                         foundmatch = True
 
                 if foundmatch == True:
+                    group1adjustedmmr = 0
+                    group1actualmmr = 0
+                    group2adjustedmmr = 0
+                    group2actualmmr = 0
+
                     for x in group1:
+                        group1adjustedmmr += self.userlist[x]["adjustedmmr"]
+                        group1actualmmr += self.userlist[x]["actualmmr"]
                         self.userlist.pop(x, None)
+                    
                     for x in group2:
+                        group2adjustedmmr += self.userlist[x]["adjustedmmr"]
+                        group2actualmmr += self.userlist[x]["actualmmr"]
                         self.userlist.pop(x, None)
 
                     print1 = []
                     print2 = []
+
+                    #####
+
+                    if "voicechannels" in database:
+                        redchannelid = database["voicechannels"]["redchannel"]
+                        bluechannelid = database["voicechannels"]["bluechannel"]
+                        waitingchannelid = database["voicechannels"]["waitingchannel"]
+
+                        redchannel = await guild.fetch_channel(redchannelid)
+                        bluechannel = await guild.fetch_channel(bluechannelid)
+                        waitingchannel = await guild.fetch_channel(waitingchannelid)
+
                     for x in group1:
                         target = await interaction.guild.fetch_member(int(x))
                         userid = target.id
                         ping = "<@" + str(userid) + ">"
                         print1.append(ping)
+
+                        try:
+                            if target in waitingchannel.members:
+                                await target.move_to(bluechannel)
+                        except:
+                            pass
+
                     for x in group2:
                         target = await interaction.guild.fetch_member(int(x))
                         userid = target.id
                         ping = "<@" + str(userid) + ">"
                         print2.append(ping)
+
+                        try:
+                            if target in waitingchannel.members:
+                                await target.move_to(redchannel)
+                        except:
+                            pass
+
+                    #####        
+
+                    print1.append(f" MMR total: {group1actualmmr}  *({group1adjustedmmr})*")
+                    print2.append(f" MMR total: {group2actualmmr}  *({group2adjustedmmr})*")
 
                     response = "empty"
                     blueteam = group1
@@ -3359,13 +3682,8 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                     cancelvotes = []
                     result=None
                     newstring = ""
-                    # if "gamedata" in database:
-                    #     if "gamename" in database["gamedata"]:
-                    #         newstring = generatequeuetext(interaction, guildstring)
-                    # else:
-                    #     newstring = ""
 
-                    newstring = await generatequeuetext(interaction, guildstring)
+                    newstring = await generatequeuetext(interaction, databasestring)
 
                     if len(group1) == 1:
                         blueuser = await interaction.guild.fetch_member(int(group1[0]))
@@ -3384,8 +3702,13 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
                                 if "Queue:" in messages.content:
                                     await messages.edit(content=f"<a:rgb:1319062935057727511>**Queue:** *(size: {self.size})* *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>")
                                     break
-                        
-                    await interaction.channel.send(f"Match Found!\nPlease select the winning team\n🟦Blue Team: {print1}\n🟥Red Team: {print2}\n{newstring}", view=VoteButtons(bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname))
+
+                    if "matchfoundchannel" in database:
+                        mychannel = await guild.fetch_channel(database["matchfoundchannel"])
+                    else:
+                        mychannel = interaction.channel
+
+                    await mychannel.send(f"Match Found!\nPlease select the winning team\n🟦Blue Team: {print1}\n🟥Red Team: {print2}\n{newstring}", view=VoteButtons(bluevotes, redvotes, cancelvotes, blueteam, redteam, databasestring, undostring, result, bluename, redname))
 
                     if len(self.userlist) == 0:
                         mychannel = interaction.channel
@@ -3401,37 +3724,44 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
 
     @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.red)
     async def NewLeaveQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
         user = interaction.user
         id = str(user.id)
         if id in self.userlist:
             del self.userlist[id]
 
-        printguildname = str(interaction.guild.name)
-        printedlist = [printguildname]
-        for x in self.userlist:
-            name = self.userlist[x]["Name"]
-            mmr = self.userlist[x]["mmr"]
-            time = self.userlist[x]["Time"]
-            printedlist.append([name, x, mmr, time])
+        # printguildname = str(interaction.guild.name)
+        # printedlist = [printguildname]
+        # for x in self.userlist:
+        #     name = self.userlist[x]["Name"]
+        #     mmr = self.userlist[x]["mmr"]
+        #     time = self.userlist[x]["Time"]
+        #     printedlist.append([name, x, mmr, time])
 
         await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(size: {self.size})* *(Members in queue: **{len(self.userlist)}**) (SBMM: {self.sbmm})*<a:rgb:1319062935057727511>")
         await interaction.followup.send(content="You left queue", ephemeral=True)
-        print(printedlist)
+        # print(printedlist)
 
 
     @discord.ui.button(label="Staff: Stop Queue", style=discord.ButtonStyle.gray)
     async def NewStopQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         valid = False
         user = interaction.user        
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        try:
+            categoryid = interaction.channel.category.id
+            databasestring = "cat" + str(categoryid) + ".json"
+            undostring = "cat" + str(categoryid) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
+            with open(undostring, 'r') as openfile:
+                undodatabase = json.load(openfile)
+        except:
+            guildname = str(interaction.guild.id)
+            databasestring = guildname + ".json"
+            undostring = str(interaction.guild.id) + "undo.json"
+            with open(databasestring, 'r') as openfile:
+                database = json.load(openfile)
+            with open(undostring, 'r') as openfile:
+                undodatabase = json.load(openfile)
 
         if "serverroles" in database:
             for x in database["serverroles"]:
@@ -3449,7 +3779,7 @@ class NewQueueButtons(discord.ui.View): # 1.3 Added SBMM toggle, fixed glitches
             print(self.userlist)
 
 
-class VoteButtons(discord.ui.View): # 1.1 uses embeds #
+class VoteButtons(discord.ui.View): # 1.3 support for new databases #
     def __init__(self, bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname):
         super().__init__(timeout=None)
         self.bluevotes=bluevotes
@@ -3467,6 +3797,8 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
         self.BlueButton.label = self.bluename
         self.RedButton.label = self.redname
 
+        with open(guildstring, 'r') as openfile:
+            self.database = json.load(openfile)
 
     @discord.ui.button(label="bluename", style=discord.ButtonStyle.blurple)
     async def BlueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -3501,10 +3833,31 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
             if self.result == None:
                 self.result = "BlueWin"
                 embed = await rankcalc(interaction, self.blueteam, self.redteam, self.guildstring, self.undostring)
-                # newstring = "Blue Team Wins!\n" + bigstring
-                # await interaction.followup.send(content=newstring, view=None)
-                # await interaction.followup.send(content=bigstring)
-                await interaction.message.edit(content=None, embed=embed, view=None)
+                with open(self.guildstring, 'r') as openfile:
+                    database = json.load(openfile)
+                if "resultschannel" in database:
+                    await interaction.message.delete()
+                    targetchannel = await interaction.guild.fetch_channel(database["resultschannel"])
+                    await targetchannel.send(embed=embed, view=None)
+                else:
+                    await interaction.message.edit(content=None, embed=embed, view=None)
+
+                if "voicechannels" in self.database:
+                    redchannelid = self.database["voicechannels"]["redchannel"]
+                    bluechannelid = self.database["voicechannels"]["bluechannel"]
+                    waitingchannelid = self.database["voicechannels"]["waitingchannel"]
+
+                    redchannel = await interaction.guild.fetch_channel(redchannelid)
+                    bluechannel = await interaction.guild.fetch_channel(bluechannelid)
+                    waitingchannel = await interaction.guild.fetch_channel(waitingchannelid)
+
+                    try:
+                        for target in redchannel.members:
+                            await target.move_to(waitingchannel)
+                        for target in bluechannel.members:
+                            await target.move_to(waitingchannel)
+                    except:
+                        pass
 
     @discord.ui.button(label="redname", style=discord.ButtonStyle.red)
     async def RedButton(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -3539,10 +3892,31 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
             if self.result == None:
                 self.result = "RedWin"
                 embed = await rankcalc(interaction, self.redteam, self.blueteam, self.guildstring, self.undostring)
-                # newstring = "Red Team Wins!\n" + bigstring
-                # await interaction.followup.send(content=newstring, view=None)
-                # await interaction.followup.send(content=bigstring)
-                await interaction.message.edit(content=None, embed=embed, view=None)
+                with open(self.guildstring, 'r') as openfile:
+                    database = json.load(openfile)
+                if "resultschannel" in database:
+                    await interaction.message.delete()
+                    targetchannel = await interaction.guild.fetch_channel(database["resultschannel"])
+                    await targetchannel.send(embed=embed, view=None)
+                else:
+                    await interaction.message.edit(content=None, embed=embed, view=None)
+
+                if "voicechannels" in self.database:
+                    redchannelid = self.database["voicechannels"]["redchannel"]
+                    bluechannelid = self.database["voicechannels"]["bluechannel"]
+                    waitingchannelid = self.database["voicechannels"]["waitingchannel"]
+
+                    redchannel = await interaction.guild.fetch_channel(redchannelid)
+                    bluechannel = await interaction.guild.fetch_channel(bluechannelid)
+                    waitingchannel = await interaction.guild.fetch_channel(waitingchannelid)
+
+                    try:
+                        for target in redchannel.members:
+                            await target.move_to(waitingchannel)
+                        for target in bluechannel.members:
+                            await target.move_to(waitingchannel)
+                    except:
+                        pass
 
     @discord.ui.button(label="Cancel Match", style=discord.ButtonStyle.gray)
     async def CancelButton(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -3580,20 +3954,35 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
                 await interaction.message.edit(content="Match canceled", view=None)
                 # await interaction.followup.send(content="Match canceled")
 
+                if "voicechannels" in self.database:
+                    redchannelid = self.database["voicechannels"]["redchannel"]
+                    bluechannelid = self.database["voicechannels"]["bluechannel"]
+                    waitingchannelid = self.database["voicechannels"]["waitingchannel"]
+
+                    redchannel = await interaction.guild.fetch_channel(redchannelid)
+                    bluechannel = await interaction.guild.fetch_channel(bluechannelid)
+                    waitingchannel = await interaction.guild.fetch_channel(waitingchannelid)
+
+                    try:
+                        for target in redchannel.members:
+                            await target.move_to(waitingchannel)
+                        for target in bluechannel.members:
+                            await target.move_to(waitingchannel)
+                    except:
+                        pass
+
     @discord.ui.button(label="Staff Override: Cancel", style=discord.ButtonStyle.gray)
     async def OverrideBButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
 
         valid = False
 
-        for x in database["serverroles"]:
-            if database["serverroles"][x] >= 1:
-                myrole = discord.utils.get(interaction.guild.roles, name=x)
-                if myrole in interaction.message.author.roles:
-                    valid = True
+        if "serverroles" in database:
+            for x in database["serverroles"]:
+                if database["serverroles"][x] >= 1:
+                    myrole = discord.utils.get(interaction.guild.roles, name=x)
+                    if myrole in interaction.message.author.roles:
+                        valid = True
 
         if interaction.user.guild_permissions.manage_guild == True or interaction.user.guild_permissions.administrator == True or str(interaction.user.id) == "215277233638604800":
             valid = True
@@ -3604,8 +3993,25 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
                 string = (f"Match canceled by {interaction.user.id}")
                 await interaction.message.edit(content=string, view=None)
 
+                if "voicechannels" in self.database:
+                    redchannelid = self.database["voicechannels"]["redchannel"]
+                    bluechannelid = self.database["voicechannels"]["bluechannel"]
+                    waitingchannelid = self.database["voicechannels"]["waitingchannel"]
 
-@client.tree.command(name="adjustuser", description="Adjust a user's details") # 0.1 #
+                    redchannel = await interaction.guild.fetch_channel(redchannelid)
+                    bluechannel = await interaction.guild.fetch_channel(bluechannelid)
+                    waitingchannel = await interaction.guild.fetch_channel(waitingchannelid)
+
+                    try:
+                        for target in redchannel.members:
+                            await target.move_to(waitingchannel)
+                        for target in bluechannel.members:
+                            await target.move_to(waitingchannel)
+                    except:
+                        pass
+
+
+@client.tree.command(name="adjustuser", description="Adjust a user's details") # 1.2 added target name #
 @app_commands.describe(target = "The user to adjust")
 @app_commands.describe(zsr = "ZSR, the default MMR")
 @app_commands.describe(uncertainty = "ZSR Uncertainty")
@@ -3620,10 +4026,8 @@ class VoteButtons(discord.ui.View): # 1.1 uses embeds #
 async def adjustuser(interaction: discord.Interaction, target: discord.Member, zsr: int = None, elo: int = None, trueskillmu: float = None, trueskillsigma: float = None, wins: int = None, losses: int = None, seasonwins: int = None, seasonlosses: int = None, streak: int = None, uncertainty: int = None):
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
 
         user = interaction.user
         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
@@ -3637,7 +4041,7 @@ async def adjustuser(interaction: discord.Interaction, target: discord.Member, z
                         valid = True
 
     if valid == True:
-        message = ""
+        message = target.name + "\n"
         id = str(target.id)
 
         if id not in database:
@@ -3693,7 +4097,7 @@ async def adjustuser(interaction: discord.Interaction, target: discord.Member, z
                 database[id]["streak"] = streak
                 message += f"Win streak adjusted to {streak}\n"
 
-        with open(guildstring, "w") as outfile:
+        with open(databasestring, "w") as outfile:
             json.dump(database, outfile, indent = 4)
 
         await interaction.response.send_message(message)
@@ -3702,13 +4106,11 @@ async def adjustuser(interaction: discord.Interaction, target: discord.Member, z
         await interaction.response.send_message("You do not have permission!", ephemeral=True)
 
 
-@client.tree.command(name="rankban", description="Ban a user from ranked") # Slash command 0.1
+@client.tree.command(name="rankban", description="Ban a user from ranked") # 1.1.1 Support for new databases #
 @app_commands.describe(targetuser = "Which user do you want to ban from ranked?")
 async def rankban(interaction: discord.Interaction, targetuser: discord.User):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     user = interaction.user
     if "serverroles" in database:
@@ -3736,17 +4138,15 @@ async def rankban(interaction: discord.Interaction, targetuser: discord.User):
 
     await interaction.response.send_message(bigstring)
 
-    with open(guildstring, "w") as outfile:
+    with open(databasestring, "w") as outfile:
         json.dump(database, outfile, indent = 4)
 
 
-@client.tree.command(name="rankunban", description="Unban a user from ranked") # Slash command 0.1
+@client.tree.command(name="rankunban", description="Unban a user from ranked") # 1.1.1 support for new databases #
 @app_commands.describe(targetuser = "Which user do you want to unban from ranked?")
 async def rankunban(interaction: discord.Interaction, targetuser: discord.User):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
 
     user = interaction.user
     if "serverroles" in database:
@@ -3774,7 +4174,7 @@ async def rankunban(interaction: discord.Interaction, targetuser: discord.User):
 
         await interaction.response.send_message(bigstring)
 
-    with open(guildstring, "w") as outfile:
+    with open(databasestring, "w") as outfile:
         json.dump(database, outfile, indent = 4)
 
 
@@ -3792,14 +4192,14 @@ async def status(interaction: discord.Interaction, status: str):
         await interaction.response.send_message("Status updated")
 
 
-@client.tree.command(name="backup", description="create a backup of your server's database") # Slash command 0.1
+@client.tree.command(name="backup", description="create a backup of your server's database") # 1.1.1 support for new databases #
 async def backup(interaction: discord.Interaction):
     if interaction.guild:
         user = interaction.user
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        
+        database = loaddatabase(interaction)
+        databasestring = getdatabasestring(interaction)
+
         valid = False
         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
             valid = True
@@ -3811,17 +4211,14 @@ async def backup(interaction: discord.Interaction):
                         valid = True
 
         if valid == True:
-            await interaction.response.send_message("Data backup:", file=discord.File(guildstring))
+            await interaction.response.send_message("Data backup:", file=discord.File(databasestring))
 
 
-@client.tree.command(name="refreshroles", description="Refresh your server's ranked roles") # proper check for role permissions
+@client.tree.command(name="refreshroles", description="Refresh your server's ranked roles") # 1.3.1 support for new databases, counts users correctly #
 async def refreshroles(interaction: discord.Interaction):
     valid = False
     if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
+        database = loaddatabase(interaction)
 
         user = interaction.user
         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
@@ -3851,24 +4248,34 @@ async def refreshroles(interaction: discord.Interaction):
         if valid == True:
             await interaction.response.send_message(f"This command is laggy. Please do not run this command often\nThis may take a moment...")
 
+            tier2 = 250
+            tier3 = 500
+            tier4 = 750
+            tier5 = 1000
+            tier6 = 1250
+            tier7 = 1500
+            tier8 = 1750
+            tier9 = 2000
+            
             if "gamedata" not in database:
                 database["gamedata"] = {}
-            if "mastertier" in database["gamedata"]:
-                tier2 = database["gamedata"]["silvertier"]
-                tier3 = database["gamedata"]["goldtier"]
-                tier4 = database["gamedata"]["platinumtier"]
-                tier5 = database["gamedata"]["diamondtier"]
-                tier6 = database["gamedata"]["mastertier"]
-            else:
-                tier2 = 200
-                tier3 = 400
-                tier4 = 600
-                tier5 = 800
-                tier6 = 1000
+            if "legendtier" in database["gamedata"]:
+                tier2 = database["gamedata"]["bronzetier"]
+                tier3 = database["gamedata"]["silvertier"]
+                tier4 = database["gamedata"]["goldtier"]
+                tier5 = database["gamedata"]["platinumtier"]
+                tier6 = database["gamedata"]["diamondtier"]
+                tier7 = database["gamedata"]["mastertier"]
+                tier8 = database["gamedata"]["grandmastertier"]
+                tier9 = database["gamedata"]["legendtier"]
 
             if "rankroles" in database:
                 print("rankroles in database")
                 guild = interaction.guild
+
+                ironname = database["rankroles"]["iron"]
+                ironrole = discord.utils.get(guild.roles, name=ironname)
+
                 bronzename = database["rankroles"]["bronze"]
                 bronzerole = discord.utils.get(guild.roles, name=bronzename)
                 silvername = database["rankroles"]["silver"]
@@ -3882,10 +4289,14 @@ async def refreshroles(interaction: discord.Interaction):
                 mastername = database["rankroles"]["master"]
                 masterrole = discord.utils.get(guild.roles, name=mastername)
 
+                grandmastername = database["rankroles"]["grandmaster"]
+                grandmasterrole = discord.utils.get(guild.roles, name=grandmastername)
+                legendname = database["rankroles"]["legend"]
+                legendrole = discord.utils.get(guild.roles, name=legendname)
+
             count = 0
             for members in database:
                 if "mmr" in database[members]:
-                    count += 1
                     mmr = database[members]["mmr"]
                     newtier = 1
                     if mmr >= tier2:
@@ -3898,47 +4309,73 @@ async def refreshroles(interaction: discord.Interaction):
                         newtier = 5
                     if mmr >= tier6:
                         newtier = 6
+                    if mmr >= tier7:
+                        newtier = 7
+                    if mmr >= tier8:
+                        newtier = 8
+                    if mmr >= tier9:
+                        newtier = 9
 
                     try:
                         user = await interaction.guild.fetch_member(int(members))
 
                         if newtier != 1:
+                            if ironrole in user.roles:
+                                await user.remove_roles(ironrole)
+                        if newtier != 2:
                             if bronzerole in user.roles:
                                 await user.remove_roles(bronzerole)
-                        if newtier != 2:
+                        if newtier != 3:
                             if silverrole in user.roles:
                                 await user.remove_roles(silverrole)
-                        if newtier != 3:
+                        if newtier != 4:
                             if goldrole in user.roles:
                                 await user.remove_roles(goldrole)
-                        if newtier != 4:
+                        if newtier != 5:
                             if platrole in user.roles:
                                 await user.remove_roles(platrole)
-                        if newtier != 5:
+                        if newtier != 6:
                             if diamondrole in user.roles:
                                 await user.remove_roles(diamondrole)
-                        if newtier != 6:
+                        if newtier != 7:
                             if masterrole in user.roles:
                                 await user.remove_roles(masterrole)
+                        if newtier != 8:
+                            if grandmasterrole in user.roles:
+                                await user.remove_roles(grandmasterrole)
+                        if newtier != 9:
+                            if legendrole in user.roles:
+                                await user.remove_roles(legendrole)
 
                         if newtier == 1:
+                            if ironrole not in user.roles:
+                                await user.add_roles(ironrole)
+                        if newtier == 2:
                             if bronzerole not in user.roles:
                                 await user.add_roles(bronzerole)
-                        if newtier == 2:
+                        if newtier == 3:
                             if silverrole not in user.roles:
                                 await user.add_roles(silverrole)
-                        if newtier == 3:
+                        if newtier == 4:
                             if goldrole not in user.roles:
                                 await user.add_roles(goldrole)
-                        if newtier == 4:
+                        if newtier == 5:
                             if platrole not in user.roles:
                                 await user.add_roles(platrole)
-                        if newtier == 5:
+                        if newtier == 6:
                             if diamondrole not in user.roles:
                                 await user.add_roles(diamondrole)
-                        if newtier == 6:
+                        if newtier == 7:
                             if masterrole not in user.roles:
-                                await user.add_roles(masterrole)  
+                                await user.add_roles(masterrole)    
+                        if newtier == 8:
+                            if grandmasterrole not in user.roles:
+                                await user.add_roles(grandmasterrole)
+                        if newtier == 9:
+                            if legendrole not in user.roles:
+                                await user.add_roles(legendrole)  
+                        
+                        count += 1
 
                     except:
                         print(f"User not found in server: {members}")
@@ -3946,27 +4383,8 @@ async def refreshroles(interaction: discord.Interaction):
             await interaction.channel.send(f"Updated {count} user's roles")
 
 
-@client.tree.command(name="randomtext", description="Generate random text like from the queue") # 0.1 #
-async def randomtext(interaction: discord.Interaction):
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-
-    if "queuetext" in database:
-        newstring = await generatequeuetext(interaction, guildstring)
-        await interaction.response.send_message(newstring)
-    else:
-        await interaction.response.send_message("No queue text found. Configure with /configqueuetext")
-
-
-###############################
-
-
-async def placecalc(context, results, guildstring):
-    undostring = str(guildstring) + "undo.json"
-    guildstring = str(guildstring) + ".json"
-    with open(guildstring, 'r') as openfile:
+async def placecalc(interaction, results, databasestring, undostring):
+    with open(databasestring, 'r') as openfile:
         database = json.load(openfile)
 
     if not os.path.exists(undostring):
@@ -3993,7 +4411,7 @@ async def placecalc(context, results, guildstring):
     totalusers = 0
     numberofplayers = 0
 
-    emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(guildstring)
+    emoji_1, emoji_2, emoji_3, emoji_4, emoji_5, emoji_6 = loademoji(databasestring)
 
     if "gamedata" not in database:
         database["gamedata"] = {}
@@ -4121,712 +4539,1578 @@ async def placecalc(context, results, guildstring):
     embed.add_field(name="", value=leftstring, inline=True)
     embed.add_field(name="", value=rightstring, inline=True)
 
-    with open(guildstring, "w") as outfile:
+    with open(databasestring, "w") as outfile:
         json.dump(database, outfile, indent = 4)
 
     return embed
 
 
-@client.tree.command(name="placement", description="Submit a game with many users having specific placings. WIP", guild=guildid) # 1.0 #
-async def placement(interaction: discord.Interaction):
-    user = interaction.user
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-    
-    if "serverroles" not in database:
-        database["serverroles"] = {}
-
-    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
-        valid = True
-
-    for x in database["serverroles"]:
-        if database["serverroles"][x] >= 1:
-            myrole = discord.utils.get(interaction.guild.roles, name=x)
-            if myrole in user.roles:
-                valid = True
-
-
-    if valid == True:
-        looping = True
-        dummy = PlacementSubmitButtons()
-        
-        await interaction.response.send_message("Input Users/Placings", view=dummy)
-
-
-class PlacementSubmitButtons(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.userdict={}
-        self.tempusers = []
-        self.tempplacing = 1
-
-    @discord.ui.button(label="Add Selection", style=discord.ButtonStyle.blurple)
-    async def PlacementSubmitUsersButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if len(self.tempusers) > 0:
-            for x in self.tempusers:
-                if str(x.id) not in self.userdict:
-                    userid = str(x.id)
-                    username = x.name
-                    self.userdict[userid] = {}
-                    self.userdict[userid]["Placement"] = self.tempplacing
-                    self.userdict[userid]["Name"] = username
-
-            self.tempplacing += 1
-            self.tempusers = []
-
-            print(self.userdict)
-            printstring = ""
-            for x in self.userdict:
-                printstring += f"{self.userdict[x]["Placement"], self.userdict[x]["Name"]}\n"
-
-            await interaction.response.edit_message(content=printstring)
-
-    @discord.ui.select(max_values=25, min_values=1, cls=discord.ui.UserSelect)
-    async def PlacementAddUsers(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
-        self.tempusers = select.values
-        await interaction.response.defer(ephemeral=True)
-    
-
-    @discord.ui.button(label="Submit Final Results", style=discord.ButtonStyle.green)
-    async def PlacementDoneButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = await placecalc(interaction, self.userdict, interaction.guild.id)
-        await interaction.channel.send(embed=embed)   
-
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
-    async def PlacementCancelButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Canceled submission", view=None)
+@client.tree.command(name="giveentitlements", description="Give user entitlements", guild=guildid) # 0.1 TEST BOT DOESNT HAVE ENTITLEMENTS FYI ~ i think this works but havent tested on main yet #
+@app_commands.describe(userid = "User ID?")
+@app_commands.describe(choice = "Which entitlements? 'ALL' for all entitlements")
+async def giveentitlements(interaction: discord.Interaction, userid: str, choice: str):
+    if interaction.user.id != 215277233638604800:
         return
 
-
-def assign_roles(users, userlist):
-    POSITIONS = ["Top", "Jg", "Mid", "Bot", "Sup"]
-
-    names = list(users)
-
-    for tempteam in permutations(names):
-        assignment = []
-        for role, user in zip(POSITIONS, tempteam):
-            if role in userlist[user]["Roles"]:
-                assignment.append((user, role))
-            else:
-                print(f"Assignment\n{assignment}\n")
-                break
-        else:
-            return assignment
-        
-    return None
-
-
-def find_best_teams(userlist):
-    allteams = []
-
-    for team1users in combinations(userlist, 5):
-        team2temp = [u for u in userlist if u not in team1users]
-        for team2users in combinations(team2temp, 5):
-            team1mmr = 0
-            team2mmr = 0
-            for x in team1users:
-                team1mmr += userlist[x]["mmr"]
-            for x in team2users:
-                team2mmr += userlist[x]["mmr"]
-            difference = abs(team1mmr - team2mmr)
-
-            allteams.append({
-                "team1": list(team1users),
-                "team2": list(team2users),
-                "team1_mmr": team1mmr,
-                "team2_mmr": team2mmr,
-                "mmr_diff": difference
-            })
-                
-            allteamssorted = sorted(allteams, key=lambda d: d['mmr_diff'], reverse=True)
-
-            for x in range(len(allteamssorted)):
-                newteam1users = allteamssorted[x]["team1"]
-                newteam2users = allteamssorted[x]["team2"]
-
-                if not assign_roles(newteam1users, userlist):
-                    continue
-
-                if not assign_roles(newteam2users, userlist):
-                    continue
-                    
-                team1roles = assign_roles(newteam1users, userlist)
-                team2roles = assign_roles(newteam2users, userlist)
-
-                if team1roles == False or team2roles == False:
-                    continue
-
-                print(team1roles)
-                print(team2roles)
-                return team1roles, team2roles
-
-
-@client.tree.command(name="lolqueue", description="Start a League of Legends matchmaking queue", guild=guildid) # 0.1
-async def lolqueue(interaction: discord.Interaction):
-    user = interaction.user
-    range = "None"
-    valid = False
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-
-    if "serverroles" in database:
-        for x in database["serverroles"]:
-            if database["serverroles"][x] >= 1:
-                myrole = discord.utils.get(interaction.guild.roles, name=x)
-                if myrole in user.roles:
-                    valid = True
-
-    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
-        valid = True
-
-    if valid == True:
-        userlist = {}
-        await interaction.response.send_message(f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(range, userlist))
-
-
-class LeagueQueueButtons(discord.ui.View): # 3.1 Added some randomness to MM
-    def __init__(self, range, userlist):
-        super().__init__(timeout=None)
-        self.range = range
-        self.userlist = userlist
-
-    @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.green)
-    async def NewJoinQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        # queuebutton = interaction.message
-        # mymessage = await interaction.channel.fetch_message(queuebutton.id)
-
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        undostring = str(interaction.guild.id) + "undo" + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
-        newuser = interaction.user
-        newid = str(newuser.id)
-
-        if newid not in database:
-            # database[newid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
-            await interaction.response.send_message(content="You have to register first!", ephemeral=True)
-
-        if newid in database:
-            # if "Elo" not in database[newid]:
-            #     database[newid]["Elo"] = findstartingelo(guildstring)
-            if "TrueSkillMu" not in database[newid]:
-                database[newid]["TrueSkillMu"] = 25
-            if "TrueSkillSigma" not in database[newid]:
-                database[newid]["TrueSkillSigma"] = 8.333
-            if "streak" not in database[newid]:
-                database[newid]["streak"] = 0
-            if "uncertainty" not in database[newid]:
-                database[newid]["uncertainty"] = 1000
-
-        with open(guildstring, "w") as outfile:
-            json.dump(database, outfile, indent = 4)
-
-        if "RankBan" in database[newid]:
-            if database[newid]["RankBan"] == "True":
-                await interaction.response.send_message(content="You are banned from queue and cannot join", ephemeral=True)
-
-        if "RankBan" not in database[newid] or database[newid]["RankBan"] == "False":
-            if newid not in self.userlist:
-                
-                mymmr = database[newid]["mmr"] + (database[newid]["uncertainty"] / 10)
-                if "gamedata" in database:
-                    if "mmrtype" in database["gamedata"]:
-                        if database["gamedata"]["mmrtype"].lower() == "elo":
-                            mymmr = database[newid]["Elo"]
-                        elif database["gamedata"]["mmrtype"].lower() == "trueskill":
-                            mymmr = (database[newid]["TrueSkillMu"] - (1.5 * database[newid]["TrueSkillSigma"])) * 25
-
-                try:
-                    mymmr += random.randint(0,100)
-                except:
-                    print(f"Couldnt add random to mmr for some reason")
-
-                myroles = []
-                TopRole = discord.utils.get(interaction.guild.roles, name="Top")
-                MidRole = discord.utils.get(interaction.guild.roles, name="Mid")
-                JgRole = discord.utils.get(interaction.guild.roles, name="Jungle")
-                BotRole = discord.utils.get(interaction.guild.roles, name="Bot")
-                SupRole = discord.utils.get(interaction.guild.roles, name="Support")
-                if TopRole in interaction.user.roles:
-                    myroles.append("Top")
-                    mymmr -= 30
-                if MidRole in interaction.user.roles:
-                    myroles.append("Mid")
-                    mymmr -= 30
-                if JgRole in interaction.user.roles:
-                    myroles.append("Jg")
-                    mymmr -= 30
-                if BotRole in interaction.user.roles:
-                    myroles.append("Bot")
-                    mymmr -= 30
-                if SupRole in interaction.user.roles:
-                    myroles.append("Sup")
-                    mymmr -= 30
-
-                if len(myroles) == 0:
-                    await interaction.response.send_message(content="You must have at least one role", ephemeral=True)
-                    return
-
-                name = interaction.user.name
-                self.userlist[newid] = {"Time": 0, "Name": name, "mmr": mymmr, "Roles": myroles}
-                await asyncio.sleep(1)
-                if newid in self.userlist:
-                    await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
-                    await interaction.followup.send(content="You joined queue", ephemeral=True)
-                else:
-                    await interaction.response.send_message(content="Error. Please try again", ephemeral=True)
-                # print(self.userlist)
-                # printguildname = str(interaction.guild.name)
-                # printedlist = [printguildname]
-                # for x in self.userlist:
-                #     name = self.userlist[x]["Name"]
-                #     mmr = self.userlist[x]["mmr"]
-                #     time = self.userlist[x]["Time"]
-                #     roles = self.userlist[x]["Roles"]
-                #     printedlist.append([name, x, mmr, time, roles])
-                # print(printedlist)
-
-        while len(self.userlist) > 0:
-
-            await asyncio.sleep(20)
-            if newid in self.userlist:
-                oldtime = self.userlist[newid]["Time"]
-                self.userlist[newid]["Time"] += 20 # 20 seconds = 20 to time value
-                newtime = self.userlist[newid]["Time"]
-                if oldtime == newtime:
-                    name = self.userlist[newid]["Name"]
-                    print("Queue time error: ", name)
-
-            if newid in self.userlist:
-                if self.userlist[newid]["Time"] >= 800: # 800 = 13:20 i think
-                    try:
-                        print(f"Removed {newid} from queue for inactivity")
-                        self.userlist.pop(newid, None)
-                    except:  
-                        print(f"Tried to remove {newid} from userlist but failed\nUserlist:\n{self.userlist}")
-
-                    atstring = "<@" + str(newid) + "> You have been in queue for a while, so you were removed automatically. Feel free to rejoin."
-                    await interaction.edit_original_response(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
-                    await interaction.followup.send(content=atstring, ephemeral=True)
-
-                    if len(self.userlist) == 0:
-                        mychannel = interaction.channel
-                        async for messages in mychannel.history(limit=150, oldest_first=False):
-                            if messages.author == client.user:
-                                if "Queue:" in messages.content:
-                                    await messages.delete()
-                                    break
-
-                        # await interaction.channel.send(f"<a:rgb:1319062935057727511>**Queue:** *(size: {self.size})* *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=NewQueueButtons(self.size, self.range, self.userlist, self.number))
-                        await interaction.channel.send(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
-
-            # printguildname = str(interaction.guild.name)
-            # printedlist = [printguildname]
-            # for x in self.userlist:
-            #     name = self.userlist[x]["Name"]
-
-            #     try:
-            #         mmr = self.userlist[x]["mmr"]
-            #     except:
-            #         mmr = 1
-            #         print(f"JoinQueueButton, MMR error for user {name} {x}")
-
-            #     time = self.userlist[x]["Time"]
-            #     printedlist.append([name, x, mmr, time])
-            # print(printedlist)
-
-            if len(self.userlist) >= 10:
-                half = 5
-
-                group1, group2 = find_best_teams(self.userlist)
-                print(group1)
-                print(group2)
-
-                print(self.userlist)
-                if group1 and group2:
-                    for x in group1:
-                        print(x)
-                        self.userlist.pop(x[0])
-                    for x in group2:
-                        print(x)
-                        self.userlist.pop(x[0])
-                    print(self.userlist)
-
-                    print1 = []
-                    print2 = []
-                    for x in group1:
-                        mytempid = x[0] # ?
-                        target = await interaction.guild.fetch_member(int(mytempid))
-                        userid = target.id
-                        ping = "<@" + str(userid) + ">"
-                        print1.append(ping)
-                    for x in group2:
-                        mytempid = x[0] # ?
-                        target = await interaction.guild.fetch_member(int(mytempid))
-                        userid = target.id
-                        ping = "<@" + str(userid) + ">"
-                        print2.append(ping)
-
-                    response = "empty"
-                    blueteam = group1
-                    redteam = group2
-                    bluevotes = []
-                    redvotes = []
-                    cancelvotes = []
-                    result=None
-                    newstring = ""
-                    # if "gamedata" in database:
-                    #     if "gamename" in database["gamedata"]:
-                    #         newstring = generatequeuetext(database["gamedata"]["gamename"])
-                    # else:
-                    #     newstring = ""
-
-                    if len(group1) == 1:
-                        blueuser = await interaction.guild.fetch_member(int(group1[0]))
-                        bluename = blueuser.display_name
-                    else:
-                        bluename = "Blue Team"
-                    if len(group2) == 1:
-                        reduser = await interaction.guild.fetch_member(int(group2[0]))
-                        redname = reduser.display_name
-                    else:
-                        redname = "Red Team"
-
-                    if len(self.userlist) >= 0:
-                        async for messages in interaction.channel.history(limit=50, oldest_first=False):
-                            if messages.author == client.user:
-                                if "Queue:" in messages.content:
-                                    await messages.edit(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>")
-                                    break
-                        
-
-                    blueteamopgg = "https://op.gg/lol/multisearch/na?summoners="
-                    redteamopgg = "https://op.gg/lol/multisearch/na?summoners="
-
-                    try:
-                        for x in group1:
-                            account = database[x]["account"].split("#")
-                            name = account[0]
-                            tag = account[1]
-                            blueteamopgg += (f"{name}%23{tag}%2C")
-
-                        for x in group2:
-                            account = database[x]["account"].split("#")
-                            name = account[0]
-                            tag = account[1]
-                            redteamopgg += (f"{name}%23{tag}%2C")
-
-                        blueteamopgg = blueteamopgg[:-3]
-                        redteamopgg = redteamopgg[:-3]
-                    except:
-                        print("Error building multiopgg")
-                    
-                    await interaction.channel.send(f"Match Found!\nPlease select the winning team\nRoles in order:  Top  /  Jg  /  Mid  /  Bot  /  Sup\n🟦Blue Team: {print1}\n🟥Red Team: {print2}\nBlue team: {blueteamopgg}\nRed Team: {redteamopgg}", view=LeagueVoteButtons(bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname))
-
-                    if len(self.userlist) == 0:
-                        mychannel = interaction.channel
-                        async for messages in mychannel.history(limit=50, oldest_first=False):
-                            if messages.author == client.user:
-                                if "Queue:" in messages.content:
-                                    await messages.delete()
-                                    break
-
-                        await interaction.channel.send(f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
-                        self.userlist.clear()
-
-
-    @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.red)
-    async def NewLeaveQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
-        user = interaction.user
-        id = str(user.id)
-        if id in self.userlist:
-            del self.userlist[id]
-
-        printguildname = str(interaction.guild.name)
-        printedlist = [printguildname]
-        for x in self.userlist:
-            name = self.userlist[x]["Name"]
-            mmr = self.userlist[x]["mmr"]
-            time = self.userlist[x]["Time"]
-            printedlist.append([name, x, mmr, time])
-
-        await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>")
-        await interaction.followup.send(content="You left queue", ephemeral=True)
-        print(printedlist)
-
-
-    @discord.ui.button(label="Staff: Stop Queue", style=discord.ButtonStyle.gray)
-    async def NewStopQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        valid = False
-        user = interaction.user        
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
-        if "serverroles" in database:
-            for x in database["serverroles"]:
-                if database["serverroles"][x] >= 1:
-                    myrole = discord.utils.get(interaction.guild.roles, name=x)
-                    if myrole in user.roles:
-                        valid = True
-
-        if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
-            valid = True
-
-        if valid == True:
-            await interaction.response.edit_message(content="Queue stopped", view=None)
-            self.userlist.clear()
-            print(self.userlist)
-
-
-class LeagueVoteButtons(discord.ui.View): # 1.1 uses embeds #
-    def __init__(self, bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname):
-        super().__init__(timeout=None)
-        self.bluevotes=bluevotes
-        self.redvotes=redvotes
-        self.cancelvotes=cancelvotes
-        self.blueteam=blueteam
-        self.redteam=redteam
-        self.guildstring=guildstring
-        self.undostring=undostring
-        self.result=result
-        self.bluename=bluename
-        self.redname=redname
-
-        # Set button labels to variables
-        self.BlueButton.label = self.bluename
-        self.RedButton.label = self.redname
-
-
-    @discord.ui.button(label="bluename", style=discord.ButtonStyle.blurple)
-    async def BlueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
-            # if interaction.user.id not in self.bluevotes:
-            self.bluevotes.append(str(interaction.user.id))
-            await interaction.response.send_message(content="You selected Blue Team", ephemeral=True)
-            if str(interaction.user.id) in self.redvotes:
-                self.redvotes.remove(str(interaction.user.id))
-            if str(interaction.user.id) in self.cancelvotes:
-                self.cancelvotes.remove(str(interaction.user.id))
-            self.bluevotes = list(set(self.bluevotes))
-
-        redvotenames = []
-        for x in self.redvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            redvotenames.append(name)
-        bluevotenames = []
-        for x in self.bluevotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            bluevotenames.append(name)
-        cancelvotenames = []
-        for x in self.cancelvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            cancelvotenames.append(name)
-        print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
-
-        if len(self.bluevotes) > len(self.redteam):
-            if self.result == None:
-                self.result = "BlueWin"
-                embed = await rankcalc(interaction, self.blueteam, self.redteam, self.guildstring, self.undostring)
-                # newstring = "Blue Team Wins!\n" + bigstring
-                # await interaction.followup.send(content=newstring, view=None)
-                # await interaction.followup.send(content=bigstring)
-                await interaction.message.edit(content=None, embed=embed, view=None)
-
-    @discord.ui.button(label="redname", style=discord.ButtonStyle.red)
-    async def RedButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
-            # if interaction.user.id not in self.redvotes:
-            self.redvotes.append(str(interaction.user.id))
-            await interaction.response.send_message(content="You selected Red Team", ephemeral=True)
-            if str(interaction.user.id) in self.bluevotes:
-                self.bluevotes.remove(str(interaction.user.id))
-            if str(interaction.user.id) in self.cancelvotes:
-                self.cancelvotes.remove(str(interaction.user.id))
-            self.redvotes = list(set(self.redvotes))
-
-        redvotenames = []
-        for x in self.redvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            redvotenames.append(name)
-        bluevotenames = []
-        for x in self.bluevotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            bluevotenames.append(name)
-        cancelvotenames = []
-        for x in self.cancelvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            cancelvotenames.append(name)
-        print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
-
-        if len(self.redvotes) > len(self.blueteam):
-            if self.result == None:
-                self.result = "RedWin"
-                embed = await rankcalc(interaction, self.redteam, self.blueteam, self.guildstring, self.undostring)
-                # newstring = "Red Team Wins!\n" + bigstring
-                # await interaction.followup.send(content=newstring, view=None)
-                # await interaction.followup.send(content=bigstring)
-                await interaction.message.edit(content=None, embed=embed, view=None)
-
-    @discord.ui.button(label="Cancel Match", style=discord.ButtonStyle.gray)
-    async def CancelButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
-            # if interaction.user.id not in self.cancelvotes:
-            self.cancelvotes.append(str(interaction.user.id))
-            await interaction.response.send_message(content="You selected Cancel Match", ephemeral=True)
-            if str(interaction.user.id) in self.bluevotes:
-                self.bluevotes.remove(str(interaction.user.id))
-            if str(interaction.user.id) in self.redvotes:
-                self.redvotes.remove(str(interaction.user.id))
-            self.cancelvotes = list(set(self.cancelvotes))
-
-        redvotenames = []
-        for x in self.redvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            redvotenames.append(name)
-        bluevotenames = []
-        for x in self.bluevotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            bluevotenames.append(name)
-        cancelvotenames = []
-        for x in self.cancelvotes:
-            target = await interaction.guild.fetch_member(int(x))
-            name = target.name
-            cancelvotenames.append(name)
-        print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
-
-        if len(self.cancelvotes) > len(self.blueteam):
-            if self.result == None:
-                self.result = "Canceled"
-                # await interaction.followup.send(content="Match canceled", view=None)
-                await interaction.message.edit(content="Match canceled", view=None)
-                # await interaction.followup.send(content="Match canceled")
-
-    @discord.ui.button(label="Staff Override: Cancel", style=discord.ButtonStyle.gray)
-    async def OverrideBButton(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
-        valid = False
-
-        for x in database["serverroles"]:
-            if database["serverroles"][x] >= 1:
-                myrole = discord.utils.get(interaction.guild.roles, name=x)
-                if myrole in interaction.message.author.roles:
-                    valid = True
-
-        if interaction.user.guild_permissions.manage_guild == True or interaction.user.guild_permissions.administrator == True or str(interaction.user.id) == "215277233638604800":
-            valid = True
-
-        if valid==True:
-            if self.result == None:
-                self.result = "Canceled"
-                string = (f"Match canceled by {interaction.user.id}")
-                await interaction.message.edit(content=string, view=None)
-
-
-@client.tree.command(name="leagueregister", description="Register a User for customs in league", guild=guildid) # 1.1 uses embeds #
-@app_commands.describe(targetuser = "Which user is being registered?")
-@app_commands.describe(usermmr = "What is the users ZSR/MMR?")
-@app_commands.describe(accountname = "What is the users Account name and tag")
-async def leagueregister(interaction: discord.Interaction, targetuser: discord.User, usermmr: int, accountname: str):
-    # Iron 400
-    # Bronze 500
-    # Silver 600
-    # Gold 700
-    # Plat 800
-    # Emerald 900
-    # Diamond 1000
-    # Master 1100
-    # GM 1200
-    # Chal 1300
-    valid = False
-    if interaction.guild:
-        guildname = str(interaction.guild.id)
-        guildstring = guildname + ".json"
-        with open(guildstring, 'r') as openfile:
-            database = json.load(openfile)
-
-        user = interaction.user
-        if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
-            valid = True
-
-        if "serverroles" in database:
-            for x in database["serverroles"]:
-                if database["serverroles"][x] >= 1:
-                    myrole = discord.utils.get(interaction.guild.roles, name=x)
-                    if myrole in user.roles:
-                        valid = True
-
-    if valid == True:
-        # if targetuser.id not in database:
-        database[x] = {"mmr": usermmr, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 0, "Elo": findstartingelo(guildstring), "TrueSkillMu": 25, "TrueSkillSigma": 8.333, "account": accountname}
-        with open(guildstring, "w") as outfile:
-            json.dump(database, outfile, indent = 4)
-        await interaction.response.send_message(f"User {targetuser.name} {accountname} added to database with {usermmr} MMR")
-
-
-@client.tree.command(name="setaccountname", description="Set a user's account name", guild=guildid) # Slash command 0.1
-@app_commands.describe(targetuser = "Which user do you want to change?")
-@app_commands.describe(accountname = "What is the users Account name and tag")
-async def setaccountname(interaction: discord.Interaction, targetuser: discord.User, accountname: str):
-    user = interaction.user
-    guildname = str(interaction.guild.id)
-    guildstring = guildname + ".json"
-    with open(guildstring, 'r') as openfile:
-        database = json.load(openfile)
-
-    if "serverroles" in database:
-        for x in database["serverroles"]:
-            if database["serverroles"][x] >= 1:
-                myrole = discord.utils.get(interaction.guild.roles, name=x)
-                if myrole in user.roles:
-                    valid = True
-
-    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
-        valid = True
-
-    if valid == True:
-        name = targetuser.name
-        targetid = str(targetuser.id)
-        if targetid in database:
-            database[targetid]["account"] = accountname
-            await interaction.response.send_message(f"Changed {name}'s account name to {accountname}")
-            with open(guildstring, "w") as outfile:
-                json.dump(database, outfile, indent = 4)
+    async for x in client.entitlements():
+        print(x.user_id + " ~ " + x.sku_id)
+
+    printstring = ""
+
+    user = await client.fetch_user(userid) # try get_user if this doesnt work?
+
+    print(f"choice: {choice}")
+
+    if choice.lower() == "all":
+        print("true")
+        list = [1361516425172357320, 1380004058797965392, 1454212285903012023]
+        for x in list:
+            try:
+                entitlement = await client.fetch_entitlement(x)
+                await client.create_entitlement(entitlement, user, "user")
+                printstring += str(x)
+            except:
+                print(f"{x} not found")
 
     else:
-        await interaction.response.send_message(f"user not found in database")
+        choice = int(choice)
+        entitlement = await client.fetch_entitlement(choice)
+        await client.create_entitlement(entitlement, user, "user")
+        printstring += str(choice)
+    
+    await interaction.response.send_message(f"Entitlements created for user: {user.name}\n{printstring}")
+
+
+@client.tree.command(name="configresultschannel", description="Choose a text channel to send all match reports to.") # 1.0.1 #
+@app_commands.describe(mychannel = "Text Channel")
+async def configresultschannel(interaction: discord.Interaction, mychannel: discord.TextChannel):
+    user = interaction.user
+    valid = False
+
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+
+    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+        valid = True
+
+    if "serverroles" in database:
+        for x in database["serverroles"]:
+            if database["serverroles"][x] >= 2:
+                myrole = discord.utils.get(interaction.guild.roles, name=x)
+                if myrole in user.roles:
+                    valid = True
+    
+    if valid == False:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+
+    if valid == True:
+        database["resultschannel"] = str(mychannel.id)
+
+        with open(databasestring, "w") as outfile:
+            json.dump(database, outfile, indent = 4)
+
+            await interaction.response.send_message(f"Results channel configured to {mychannel.name}")
+
+
+@client.tree.command(name="configmatchfoundchannel", description="Choose a text channel to send found queue matches to.") # 1.0 #
+@app_commands.describe(mychannel = "Text Channel")
+async def configmatchfoundchannel(interaction: discord.Interaction, mychannel: discord.TextChannel):
+    user = interaction.user
+    valid = False
+
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+
+    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+        valid = True
+
+    if "serverroles" in database:
+        for x in database["serverroles"]:
+            if database["serverroles"][x] >= 2:
+                myrole = discord.utils.get(interaction.guild.roles, name=x)
+                if myrole in user.roles:
+                    valid = True
+    
+    if valid == False:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+
+    if valid == True:
+        database["matchfoundchannel"] = str(mychannel.id)
+
+        with open(databasestring, "w") as outfile:
+            json.dump(database, outfile, indent = 4)
+
+            await interaction.response.send_message(f"Results channel configured to {mychannel.name}")
+
+
+@client.tree.command(name="createdatabase", description="Create an additional database within a server, contained within a server category") # 1.0.1 #
+@app_commands.describe(category = "Server Category")
+async def createdatabase(interaction: discord.Interaction, category: discord.CategoryChannel):
+    user = interaction.user
+    valid = False
+    paid = False
+
+    guildname = str(interaction.guild.id)
+    guildstring = guildname + ".json"
+    with open(guildstring, 'r') as openfile:
+        database = json.load(openfile)
+
+    if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+        print("valid")
+        valid = True
+
+    if "serverroles" in database:
+        for x in database["serverroles"]:
+            if database["serverroles"][x] >= 3:
+                myrole = discord.utils.get(interaction.guild.roles, name=x)
+                if myrole in user.roles:
+                    print("valid")
+                    valid = True
+    
+    if valid == False:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+
+    if valid == True:
+        async for entitlement in client.entitlements(user=interaction.user):
+            if entitlement.sku_id == 1454212285903012023:
+                paid = True
+                print(f"user {interaction.user.id} attempting to create alt database")
+        if str(user.id) == "215277233638604800":
+            print("zing")
+            paid = True
+
+    if valid == True and paid == True:
+        filename = "cat" + str(category.id) + ".json"
+        print(filename)
+        if os.path.exists(filename):
+            await interaction.response.send_message(f"File for category {category.id} already exists")
+            return
+
+        if not os.path.exists(filename):
+            tempdatabase = {}
+            with open(filename, 'w') as file:
+                json.dump(tempdatabase, file, indent=4)
+
+            async for entitlement in client.entitlements(user=interaction.user):
+                if entitlement.sku_id == 1454212285903012023:
+                    entitlement.delete
+                    print(f"Deleted entitlement {entitlement.sku_id} from {interaction.user.id}")
+            await interaction.response.send_message(f"Database created for category {str(category.id)}")
+            print(f"{interaction.user.id} created alt database {category.id}")
+
+
+@client.tree.command(name="randomtext", description="Generate random text like from the queue") # 0.1.1 #
+async def randomtext(interaction: discord.Interaction):
+    database = loaddatabase(interaction)
+    databasestring = getdatabasestring(interaction)
+    undodatabase = loadundodatabase(interaction)
+    undostring = getundostring(interaction)
+
+    if "queuetext" in database:
+        newstring = await generatequeuetext(interaction, databasestring)
+        await interaction.response.send_message(newstring)
+    else:
+        await interaction.response.send_message("No queue text found. Configure with /configqueuetext")
 
 
 
 
 
 
+# @client.tree.command(name="placement", description="Submit a game with many users having specific placings. WIP") # 1.0 #
+# async def placement(interaction: discord.Interaction):
+#     user = interaction.user
+#     guildname = str(interaction.guild.id)
+#     guildstring = guildname + ".json"
+#     with open(guildstring, 'r') as openfile:
+#         database = json.load(openfile)
+    
+#     if "serverroles" not in database:
+#         database["serverroles"] = {}
+
+#     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+#         valid = True
+
+#     for x in database["serverroles"]:
+#         if database["serverroles"][x] >= 1:
+#             myrole = discord.utils.get(interaction.guild.roles, name=x)
+#             if myrole in user.roles:
+#                 valid = True
+
+
+#     if valid == True:
+#         looping = True
+#         dummy = PlacementSubmitButtons()
+        
+#         await interaction.response.send_message("Input Users/Placings", view=dummy)
+
+
+# class PlacementSubmitButtons(discord.ui.View):
+#     def __init__(self):
+#         super().__init__(timeout=None)
+#         self.userdict={}
+#         self.tempusers = []
+#         self.tempplacing = 1
+
+#     @discord.ui.button(label="Add Selection", style=discord.ButtonStyle.blurple)
+#     async def PlacementSubmitUsersButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if len(self.tempusers) > 0:
+#             for x in self.tempusers:
+#                 if str(x.id) not in self.userdict:
+#                     userid = str(x.id)
+#                     username = x.name
+#                     self.userdict[userid] = {}
+#                     self.userdict[userid]["Placement"] = self.tempplacing
+#                     self.userdict[userid]["Name"] = username
+
+#             self.tempplacing += 1
+#             self.tempusers = []
+
+#             print(self.userdict)
+#             printstring = ""
+#             for x in self.userdict:
+#                 printstring += f"{self.userdict[x]["Placement"], self.userdict[x]["Name"]}\n"
+
+#             await interaction.response.edit_message(content=printstring)
+
+#     @discord.ui.select(max_values=25, min_values=1, cls=discord.ui.UserSelect)
+#     async def PlacementAddUsers(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+#         self.tempusers = select.values
+#         await interaction.response.defer(ephemeral=True)
+    
+
+#     @discord.ui.button(label="Submit Final Results", style=discord.ButtonStyle.green)
+#     async def PlacementDoneButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         embed = await placecalc(interaction, self.userdict, interaction.guild.id)
+#         await interaction.channel.send(embed=embed)   
+
+
+#     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
+#     async def PlacementCancelButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         await interaction.response.edit_message(content="Canceled submission", view=None)
+#         return
+
+###############################
+
+
+# def assign_roles(users, userlist):
+#     POSITIONS = ["Top", "Jg", "Mid", "Bot", "Sup"]
+
+#     names = list(users)
+
+#     for tempteam in permutations(names):
+#         assignment = []
+#         for role, user in zip(POSITIONS, tempteam):
+#             if role in userlist[user]["Roles"]:
+#                 assignment.append((user, role))
+#             else:
+#                 print(f"Assignment\n{assignment}\n")
+#                 break
+#         else:
+#             return assignment
+        
+#     return None
+
+
+# def find_best_teams(userlist):
+#     allteams = []
+
+#     for team1users in combinations(userlist, 5):
+#         team2temp = [u for u in userlist if u not in team1users]
+#         for team2users in combinations(team2temp, 5):
+#             team1mmr = 0
+#             team2mmr = 0
+#             for x in team1users:
+#                 team1mmr += userlist[x]["mmr"]
+#             for x in team2users:
+#                 team2mmr += userlist[x]["mmr"]
+#             difference = abs(team1mmr - team2mmr)
+
+#             allteams.append({
+#                 "team1": list(team1users),
+#                 "team2": list(team2users),
+#                 "team1_mmr": team1mmr,
+#                 "team2_mmr": team2mmr,
+#                 "mmr_diff": difference
+#             })
+                
+#             allteamssorted = sorted(allteams, key=lambda d: d['mmr_diff'], reverse=True)
+
+#             for x in range(len(allteamssorted)):
+#                 newteam1users = allteamssorted[x]["team1"]
+#                 newteam2users = allteamssorted[x]["team2"]
+
+#                 if not assign_roles(newteam1users, userlist):
+#                     continue
+
+#                 if not assign_roles(newteam2users, userlist):
+#                     continue
+                    
+#                 team1roles = assign_roles(newteam1users, userlist)
+#                 team2roles = assign_roles(newteam2users, userlist)
+
+#                 if team1roles == False or team2roles == False:
+#                     continue
+
+#                 print(team1roles)
+#                 print(team2roles)
+#                 return team1roles, team2roles
+
+
+# @client.tree.command(name="lolqueue", description="Start a League of Legends matchmaking queue") # 0.1
+# async def lolqueue(interaction: discord.Interaction):
+#     user = interaction.user
+#     range = "None"
+#     valid = False
+#     guildname = str(interaction.guild.id)
+#     guildstring = guildname + ".json"
+#     with open(guildstring, 'r') as openfile:
+#         database = json.load(openfile)
+
+#     if "serverroles" in database:
+#         for x in database["serverroles"]:
+#             if database["serverroles"][x] >= 1:
+#                 myrole = discord.utils.get(interaction.guild.roles, name=x)
+#                 if myrole in user.roles:
+#                     valid = True
+
+#     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+#         valid = True
+
+#     if valid == True:
+#         userlist = {}
+#         await interaction.response.send_message(f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(range, userlist))
+
+
+# class LeagueQueueButtons(discord.ui.View): # 3.1 Added some randomness to MM
+#     def __init__(self, range, userlist):
+#         super().__init__(timeout=None)
+#         self.range = range
+#         self.userlist = userlist
+
+#     @discord.ui.button(label="Join Queue", style=discord.ButtonStyle.green)
+#     async def NewJoinQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+#         # queuebutton = interaction.message
+#         # mymessage = await interaction.channel.fetch_message(queuebutton.id)
+
+#         guildname = str(interaction.guild.id)
+#         guildstring = guildname + ".json"
+#         undostring = str(interaction.guild.id) + "undo" + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+
+#         newuser = interaction.user
+#         newid = str(newuser.id)
+
+#         if newid not in database:
+#             # database[newid] = {"mmr": 0, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 1000}
+#             await interaction.response.send_message(content="You have to register first!", ephemeral=True)
+
+#         if newid in database:
+#             # if "Elo" not in database[newid]:
+#             #     database[newid]["Elo"] = findstartingelo(guildstring)
+#             if "TrueSkillMu" not in database[newid]:
+#                 database[newid]["TrueSkillMu"] = 25
+#             if "TrueSkillSigma" not in database[newid]:
+#                 database[newid]["TrueSkillSigma"] = 8.333
+#             if "streak" not in database[newid]:
+#                 database[newid]["streak"] = 0
+#             if "uncertainty" not in database[newid]:
+#                 database[newid]["uncertainty"] = 1000
+
+#         with open(guildstring, "w") as outfile:
+#             json.dump(database, outfile, indent = 4)
+
+#         if "RankBan" in database[newid]:
+#             if database[newid]["RankBan"] == "True":
+#                 await interaction.response.send_message(content="You are banned from queue and cannot join", ephemeral=True)
+
+#         if "RankBan" not in database[newid] or database[newid]["RankBan"] == "False":
+#             if newid not in self.userlist:
+                
+#                 mymmr = database[newid]["mmr"] + (database[newid]["uncertainty"] / 10)
+#                 if "gamedata" in database:
+#                     if "mmrtype" in database["gamedata"]:
+#                         if database["gamedata"]["mmrtype"].lower() == "elo":
+#                             mymmr = database[newid]["Elo"]
+#                         elif database["gamedata"]["mmrtype"].lower() == "trueskill":
+#                             mymmr = (database[newid]["TrueSkillMu"] - (1.5 * database[newid]["TrueSkillSigma"])) * 25
+
+#                 try:
+#                     mymmr += random.randint(0,100)
+#                 except:
+#                     print(f"Couldnt add random to mmr for some reason")
+
+#                 myroles = []
+#                 TopRole = discord.utils.get(interaction.guild.roles, name="Top")
+#                 MidRole = discord.utils.get(interaction.guild.roles, name="Mid")
+#                 JgRole = discord.utils.get(interaction.guild.roles, name="Jungle")
+#                 BotRole = discord.utils.get(interaction.guild.roles, name="Bot")
+#                 SupRole = discord.utils.get(interaction.guild.roles, name="Support")
+#                 if TopRole in interaction.user.roles:
+#                     myroles.append("Top")
+#                     mymmr -= 30
+#                 if MidRole in interaction.user.roles:
+#                     myroles.append("Mid")
+#                     mymmr -= 30
+#                 if JgRole in interaction.user.roles:
+#                     myroles.append("Jg")
+#                     mymmr -= 30
+#                 if BotRole in interaction.user.roles:
+#                     myroles.append("Bot")
+#                     mymmr -= 30
+#                 if SupRole in interaction.user.roles:
+#                     myroles.append("Sup")
+#                     mymmr -= 30
+
+#                 if len(myroles) == 0:
+#                     await interaction.response.send_message(content="You must have at least one role", ephemeral=True)
+#                     return
+
+#                 name = interaction.user.name
+#                 self.userlist[newid] = {"Time": 0, "Name": name, "mmr": mymmr, "Roles": myroles}
+#                 await asyncio.sleep(1)
+#                 if newid in self.userlist:
+#                     await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
+#                     await interaction.followup.send(content="You joined queue", ephemeral=True)
+#                 else:
+#                     await interaction.response.send_message(content="Error. Please try again", ephemeral=True)
+#                 # print(self.userlist)
+#                 # printguildname = str(interaction.guild.name)
+#                 # printedlist = [printguildname]
+#                 # for x in self.userlist:
+#                 #     name = self.userlist[x]["Name"]
+#                 #     mmr = self.userlist[x]["mmr"]
+#                 #     time = self.userlist[x]["Time"]
+#                 #     roles = self.userlist[x]["Roles"]
+#                 #     printedlist.append([name, x, mmr, time, roles])
+#                 # print(printedlist)
+
+#         while len(self.userlist) > 0:
+
+#             await asyncio.sleep(20)
+#             if newid in self.userlist:
+#                 oldtime = self.userlist[newid]["Time"]
+#                 self.userlist[newid]["Time"] += 20 # 20 seconds = 20 to time value
+#                 newtime = self.userlist[newid]["Time"]
+#                 if oldtime == newtime:
+#                     name = self.userlist[newid]["Name"]
+#                     print("Queue time error: ", name)
+
+#             if newid in self.userlist:
+#                 if self.userlist[newid]["Time"] >= 800: # 800 = 13:20 i think
+#                     try:
+#                         print(f"Removed {newid} from queue for inactivity")
+#                         self.userlist.pop(newid, None)
+#                     except:  
+#                         print(f"Tried to remove {newid} from userlist but failed\nUserlist:\n{self.userlist}")
+
+#                     atstring = "<@" + str(newid) + "> You have been in queue for a while, so you were removed automatically. Feel free to rejoin."
+#                     await interaction.edit_original_response(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
+#                     await interaction.followup.send(content=atstring, ephemeral=True)
+
+#                     if len(self.userlist) == 0:
+#                         mychannel = interaction.channel
+#                         async for messages in mychannel.history(limit=150, oldest_first=False):
+#                             if messages.author == client.user:
+#                                 if "Queue:" in messages.content:
+#                                     await messages.delete()
+#                                     break
+
+#                         # await interaction.channel.send(f"<a:rgb:1319062935057727511>**Queue:** *(size: {self.size})* *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=NewQueueButtons(self.size, self.range, self.userlist, self.number))
+#                         await interaction.channel.send(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
+
+#             # printguildname = str(interaction.guild.name)
+#             # printedlist = [printguildname]
+#             # for x in self.userlist:
+#             #     name = self.userlist[x]["Name"]
+
+#             #     try:
+#             #         mmr = self.userlist[x]["mmr"]
+#             #     except:
+#             #         mmr = 1
+#             #         print(f"JoinQueueButton, MMR error for user {name} {x}")
+
+#             #     time = self.userlist[x]["Time"]
+#             #     printedlist.append([name, x, mmr, time])
+#             # print(printedlist)
+
+#             if len(self.userlist) >= 10:
+#                 half = 5
+
+#                 group1, group2 = find_best_teams(self.userlist)
+#                 print(group1)
+#                 print(group2)
+
+#                 print(self.userlist)
+#                 if group1 and group2:
+#                     for x in group1:
+#                         print(x)
+#                         self.userlist.pop(x[0])
+#                     for x in group2:
+#                         print(x)
+#                         self.userlist.pop(x[0])
+#                     print(self.userlist)
+
+#                     print1 = []
+#                     print2 = []
+#                     for x in group1:
+#                         mytempid = x[0] # ?
+#                         target = await interaction.guild.fetch_member(int(mytempid))
+#                         userid = target.id
+#                         ping = "<@" + str(userid) + ">"
+#                         print1.append(ping)
+#                     for x in group2:
+#                         mytempid = x[0] # ?
+#                         target = await interaction.guild.fetch_member(int(mytempid))
+#                         userid = target.id
+#                         ping = "<@" + str(userid) + ">"
+#                         print2.append(ping)
+
+#                     response = "empty"
+#                     blueteam = group1
+#                     redteam = group2
+#                     bluevotes = []
+#                     redvotes = []
+#                     cancelvotes = []
+#                     result=None
+#                     newstring = ""
+#                     # if "gamedata" in database:
+#                     #     if "gamename" in database["gamedata"]:
+#                     #         newstring = generatequeuetext(database["gamedata"]["gamename"])
+#                     # else:
+#                     #     newstring = ""
+
+#                     if len(group1) == 1:
+#                         blueuser = await interaction.guild.fetch_member(int(group1[0]))
+#                         bluename = blueuser.display_name
+#                     else:
+#                         bluename = "Blue Team"
+#                     if len(group2) == 1:
+#                         reduser = await interaction.guild.fetch_member(int(group2[0]))
+#                         redname = reduser.display_name
+#                     else:
+#                         redname = "Red Team"
+
+#                     if len(self.userlist) >= 0:
+#                         async for messages in interaction.channel.history(limit=50, oldest_first=False):
+#                             if messages.author == client.user:
+#                                 if "Queue:" in messages.content:
+#                                     await messages.edit(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>")
+#                                     break
+                        
+
+#                     blueteamopgg = "https://op.gg/lol/multisearch/na?summoners="
+#                     redteamopgg = "https://op.gg/lol/multisearch/na?summoners="
+
+#                     try:
+#                         for x in group1:
+#                             account = database[x]["account"].split("#")
+#                             name = account[0]
+#                             tag = account[1]
+#                             blueteamopgg += (f"{name}%23{tag}%2C")
+
+#                         for x in group2:
+#                             account = database[x]["account"].split("#")
+#                             name = account[0]
+#                             tag = account[1]
+#                             redteamopgg += (f"{name}%23{tag}%2C")
+
+#                         blueteamopgg = blueteamopgg[:-3]
+#                         redteamopgg = redteamopgg[:-3]
+#                     except:
+#                         print("Error building multiopgg")
+                    
+#                     await interaction.channel.send(f"Match Found!\nPlease select the winning team\nRoles in order:  Top  /  Jg  /  Mid  /  Bot  /  Sup\n🟦Blue Team: {print1}\n🟥Red Team: {print2}\nBlue team: {blueteamopgg}\nRed Team: {redteamopgg}", view=LeagueVoteButtons(bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname))
+
+#                     if len(self.userlist) == 0:
+#                         mychannel = interaction.channel
+#                         async for messages in mychannel.history(limit=50, oldest_first=False):
+#                             if messages.author == client.user:
+#                                 if "Queue:" in messages.content:
+#                                     await messages.delete()
+#                                     break
+
+#                         await interaction.channel.send(f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>", view=LeagueQueueButtons(self.range, self.userlist))
+#                         self.userlist.clear()
+
+
+#     @discord.ui.button(label="Leave Queue", style=discord.ButtonStyle.red)
+#     async def NewLeaveQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         guildname = str(interaction.guild.id)
+#         guildstring = guildname + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+
+#         user = interaction.user
+#         id = str(user.id)
+#         if id in self.userlist:
+#             del self.userlist[id]
+
+#         printguildname = str(interaction.guild.name)
+#         printedlist = [printguildname]
+#         for x in self.userlist:
+#             name = self.userlist[x]["Name"]
+#             mmr = self.userlist[x]["mmr"]
+#             time = self.userlist[x]["Time"]
+#             printedlist.append([name, x, mmr, time])
+
+#         await interaction.response.edit_message(content=f"<a:rgb:1319062935057727511>**Queue:** *(Members in queue: **{len(self.userlist)}**)*<a:rgb:1319062935057727511>")
+#         await interaction.followup.send(content="You left queue", ephemeral=True)
+#         print(printedlist)
+
+
+#     @discord.ui.button(label="Staff: Stop Queue", style=discord.ButtonStyle.gray)
+#     async def NewStopQueueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         valid = False
+#         user = interaction.user        
+#         guildname = str(interaction.guild.id)
+#         guildstring = guildname + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+
+#         if "serverroles" in database:
+#             for x in database["serverroles"]:
+#                 if database["serverroles"][x] >= 1:
+#                     myrole = discord.utils.get(interaction.guild.roles, name=x)
+#                     if myrole in user.roles:
+#                         valid = True
+
+#         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+#             valid = True
+
+#         if valid == True:
+#             await interaction.response.edit_message(content="Queue stopped", view=None)
+#             self.userlist.clear()
+#             print(self.userlist)
+
+
+# class LeagueVoteButtons(discord.ui.View): # 1.1 uses embeds #
+#     def __init__(self, bluevotes, redvotes, cancelvotes, blueteam, redteam, guildstring, undostring, result, bluename, redname):
+#         super().__init__(timeout=None)
+#         self.bluevotes=bluevotes
+#         self.redvotes=redvotes
+#         self.cancelvotes=cancelvotes
+#         self.blueteam=blueteam
+#         self.redteam=redteam
+#         self.guildstring=guildstring
+#         self.undostring=undostring
+#         self.result=result
+#         self.bluename=bluename
+#         self.redname=redname
+
+#         # Set button labels to variables
+#         self.BlueButton.label = self.bluename
+#         self.RedButton.label = self.redname
+
+
+#     @discord.ui.button(label="bluename", style=discord.ButtonStyle.blurple)
+#     async def BlueButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
+#             # if interaction.user.id not in self.bluevotes:
+#             self.bluevotes.append(str(interaction.user.id))
+#             await interaction.response.send_message(content="You selected Blue Team", ephemeral=True)
+#             if str(interaction.user.id) in self.redvotes:
+#                 self.redvotes.remove(str(interaction.user.id))
+#             if str(interaction.user.id) in self.cancelvotes:
+#                 self.cancelvotes.remove(str(interaction.user.id))
+#             self.bluevotes = list(set(self.bluevotes))
+
+#         redvotenames = []
+#         for x in self.redvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             redvotenames.append(name)
+#         bluevotenames = []
+#         for x in self.bluevotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             bluevotenames.append(name)
+#         cancelvotenames = []
+#         for x in self.cancelvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             cancelvotenames.append(name)
+#         print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
+
+#         if len(self.bluevotes) > len(self.redteam):
+#             if self.result == None:
+#                 self.result = "BlueWin"
+#                 embed = await rankcalc(interaction, self.blueteam, self.redteam, self.guildstring, self.undostring)
+#                 # newstring = "Blue Team Wins!\n" + bigstring
+#                 # await interaction.followup.send(content=newstring, view=None)
+#                 # await interaction.followup.send(content=bigstring)
+#                 await interaction.message.edit(content=None, embed=embed, view=None)
+
+#     @discord.ui.button(label="redname", style=discord.ButtonStyle.red)
+#     async def RedButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
+#             # if interaction.user.id not in self.redvotes:
+#             self.redvotes.append(str(interaction.user.id))
+#             await interaction.response.send_message(content="You selected Red Team", ephemeral=True)
+#             if str(interaction.user.id) in self.bluevotes:
+#                 self.bluevotes.remove(str(interaction.user.id))
+#             if str(interaction.user.id) in self.cancelvotes:
+#                 self.cancelvotes.remove(str(interaction.user.id))
+#             self.redvotes = list(set(self.redvotes))
+
+#         redvotenames = []
+#         for x in self.redvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             redvotenames.append(name)
+#         bluevotenames = []
+#         for x in self.bluevotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             bluevotenames.append(name)
+#         cancelvotenames = []
+#         for x in self.cancelvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             cancelvotenames.append(name)
+#         print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
+
+#         if len(self.redvotes) > len(self.blueteam):
+#             if self.result == None:
+#                 self.result = "RedWin"
+#                 embed = await rankcalc(interaction, self.redteam, self.blueteam, self.guildstring, self.undostring)
+#                 # newstring = "Red Team Wins!\n" + bigstring
+#                 # await interaction.followup.send(content=newstring, view=None)
+#                 # await interaction.followup.send(content=bigstring)
+#                 await interaction.message.edit(content=None, embed=embed, view=None)
+
+#     @discord.ui.button(label="Cancel Match", style=discord.ButtonStyle.gray)
+#     async def CancelButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if str(interaction.user.id) in self.blueteam or str(interaction.user.id) in self.redteam:
+#             # if interaction.user.id not in self.cancelvotes:
+#             self.cancelvotes.append(str(interaction.user.id))
+#             await interaction.response.send_message(content="You selected Cancel Match", ephemeral=True)
+#             if str(interaction.user.id) in self.bluevotes:
+#                 self.bluevotes.remove(str(interaction.user.id))
+#             if str(interaction.user.id) in self.redvotes:
+#                 self.redvotes.remove(str(interaction.user.id))
+#             self.cancelvotes = list(set(self.cancelvotes))
+
+#         redvotenames = []
+#         for x in self.redvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             redvotenames.append(name)
+#         bluevotenames = []
+#         for x in self.bluevotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             bluevotenames.append(name)
+#         cancelvotenames = []
+#         for x in self.cancelvotes:
+#             target = await interaction.guild.fetch_member(int(x))
+#             name = target.name
+#             cancelvotenames.append(name)
+#         print(f"\nRedvotes:{redvotenames}\nBluevotes:{bluevotenames}\nCancelvotes:{cancelvotenames}")
+
+#         if len(self.cancelvotes) > len(self.blueteam):
+#             if self.result == None:
+#                 self.result = "Canceled"
+#                 # await interaction.followup.send(content="Match canceled", view=None)
+#                 await interaction.message.edit(content="Match canceled", view=None)
+#                 # await interaction.followup.send(content="Match canceled")
+
+#     @discord.ui.button(label="Staff Override: Cancel", style=discord.ButtonStyle.gray)
+#     async def OverrideBButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         guildname = str(interaction.guild.id)
+#         guildstring = guildname + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+
+#         valid = False
+
+#         for x in database["serverroles"]:
+#             if database["serverroles"][x] >= 1:
+#                 myrole = discord.utils.get(interaction.guild.roles, name=x)
+#                 if myrole in interaction.message.author.roles:
+#                     valid = True
+
+#         if interaction.user.guild_permissions.manage_guild == True or interaction.user.guild_permissions.administrator == True or str(interaction.user.id) == "215277233638604800":
+#             valid = True
+
+#         if valid==True:
+#             if self.result == None:
+#                 self.result = "Canceled"
+#                 string = (f"Match canceled by {interaction.user.id}")
+#                 await interaction.message.edit(content=string, view=None)
+
+
+# @client.tree.command(name="leagueregister", description="Register a User for customs in league") # 1.1 uses embeds #
+# @app_commands.describe(targetuser = "Which user is being registered?")
+# @app_commands.describe(usermmr = "What is the users ZSR/MMR?")
+# @app_commands.describe(accountname = "What is the users Account name and tag")
+# async def leagueregister(interaction: discord.Interaction, targetuser: discord.User, usermmr: int, accountname: str):
+#     # Iron 400
+#     # Bronze 500
+#     # Silver 600
+#     # Gold 700
+#     # Plat 800
+#     # Emerald 900
+#     # Diamond 1000
+#     # Master 1100
+#     # GM 1200
+#     # Chal 1300
+#     valid = False
+#     if interaction.guild:
+#         guildname = str(interaction.guild.id)
+#         guildstring = guildname + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+
+#         user = interaction.user
+#         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+#             valid = True
+
+#         if "serverroles" in database:
+#             for x in database["serverroles"]:
+#                 if database["serverroles"][x] >= 1:
+#                     myrole = discord.utils.get(interaction.guild.roles, name=x)
+#                     if myrole in user.roles:
+#                         valid = True
+
+#     if valid == True:
+#         # if targetuser.id not in database:
+#         database[x] = {"mmr": usermmr, "wins": 0, "losses": 0, "streak": 0, "uncertainty": 0, "Elo": findstartingelo(guildstring), "TrueSkillMu": 25, "TrueSkillSigma": 8.333, "account": accountname}
+#         with open(guildstring, "w") as outfile:
+#             json.dump(database, outfile, indent = 4)
+#         await interaction.response.send_message(f"User {targetuser.name} {accountname} added to database with {usermmr} MMR")
+
+
+# @client.tree.command(name="setaccountname", description="Set a user's account name") # Slash command 0.1
+# @app_commands.describe(targetuser = "Which user do you want to change?")
+# @app_commands.describe(accountname = "What is the users Account name and tag")
+# async def setaccountname(interaction: discord.Interaction, targetuser: discord.User, accountname: str):
+#     user = interaction.user
+#     guildname = str(interaction.guild.id)
+#     guildstring = guildname + ".json"
+#     with open(guildstring, 'r') as openfile:
+#         database = json.load(openfile)
+
+#     if "serverroles" in database:
+#         for x in database["serverroles"]:
+#             if database["serverroles"][x] >= 1:
+#                 myrole = discord.utils.get(interaction.guild.roles, name=x)
+#                 if myrole in user.roles:
+#                     valid = True
+
+#     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(user.id) == "215277233638604800":
+#         valid = True
+
+#     if valid == True:
+#         name = targetuser.name
+#         targetid = str(targetuser.id)
+#         if targetid in database:
+#             database[targetid]["account"] = accountname
+#             await interaction.response.send_message(f"Changed {name}'s account name to {accountname}")
+#             with open(guildstring, "w") as outfile:
+#                 json.dump(database, outfile, indent = 4)
+
+#     else:
+#         await interaction.response.send_message(f"user not found in database")
+
+
+###############################
+
+
+# @client.tree.command(name="join", description="join voice")
+# async def join(interaction: discord.Interaction):
+#     if (interaction.user.voice):
+        
+#         channel = interaction.user.voice.channel
+#         voice = await channel.connect()
+
+#         directory = "C:\\Users\\zingt\\Music\\"
+
+#         await interaction.response.send_message("Playing music...")
+
+#         while True:
+#             await asyncio.sleep(2)
+
+#             if voice.is_playing():
+#                 pass
+#             else:
+#                 # await voice.disconnect() # disconnects after song ends
+
+#                 filename = random.choice(os.listdir(directory))
+#                 filepath = f"C:\\Users\\zingt\\Music\\{filename}"
+#                 source = FFmpegPCMAudio(str(filepath))
+
+#                 filename = filename[:-4]
+#                 await interaction.channel.send(content=f"Playing: {filename}")
+
+#                 source = discord.PCMVolumeTransformer(source, 0.07) # <-- AttributeError: '_MissingSentinel' object has no attribute 'read'
+#                 player = voice.play(source)
+
+
+# @client.tree.command(name="join", description="join voice")
+# async def join(interaction: discord.Interaction):
+#     if (interaction.user.voice):
+        
+#         channel = interaction.user.voice.channel
+#         voice = await channel.connect()
+#         directory = "C:\\Users\\zingt\\Music\\"
+
+#         await interaction.response.send_message("Playing music...")
+
+#         if True:
+#             while voice.is_playing() == False and client.user in channel.members:
+#                 # await voice.disconnect() # disconnects after song ends
+#                 await asyncio.sleep(4)
+#                 if voice.is_playing() == False:
+#                     filename = random.choice(os.listdir(directory))
+#                     filepath = f"C:\\Users\\zingt\\Music\\{filename}"
+#                     source = FFmpegPCMAudio(str(filepath))
+
+#                     filename = filename[:-4]
+#                     await interaction.edit_original_response(content=f"<a:lil_swag:1369463711680696340> Playing: **{filename}**", view=audiobuttons(voice))
+
+#                     source = discord.PCMVolumeTransformer(source, 0.07)
+#                     await asyncio.sleep(1)
+#                     player = voice.play(source)
+            
+
+# class audiobuttons(discord.ui.View):
+#     def __init__(self, voice):
+#         super().__init__(timeout=None)
+#         self.voice=voice
+
+
+#     @discord.ui.button(label="Skip", style=discord.ButtonStyle.green)
+#     async def SkipButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if interaction.user in self.voice.channel.members:
+#             if client.user in self.voice.channel.members:
+#                 await interaction.response.defer()
+#                 self.voice.pause()
+#                 await asyncio.sleep(1)
+
+#                 directory = "C:\\Users\\zingt\\Music\\"
+#                 filename = random.choice(os.listdir(directory))
+#                 filepath = f"C:\\Users\\zingt\\Music\\{filename}"
+#                 source = FFmpegPCMAudio(str(filepath))
+
+#                 filename = filename[:-4]
+#                 await interaction.edit_original_response(content=f"<a:lil_swag:1369463711680696340> Playing: **{filename}**")
+
+
+#                 source = discord.PCMVolumeTransformer(source, 0.07)
+#                 await asyncio.sleep(1)
+#                 player = self.voice.play(source)
+
+
+#     @discord.ui.button(label="Stop", style=discord.ButtonStyle.red)
+#     async def StopButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         if interaction.user in self.voice.channel.members:
+#             await interaction.response.defer()
+#             await interaction.edit_original_response(view=None)
+            
+#             self.voice.stop
+#             await self.voice.disconnect()
+
+
+
+# @client.tree.command(name="pokemon", description="Generate a team of pokemon") # proper check for role permissions
+# @app_commands.describe(balanced = "Balance Levels?")
+# async def pokemon(interaction: discord.Interaction, balanced: bool):
+#     output = generate_pokemon(balanced)
+#     await interaction.response.send_message(output, ephemeral=True)
+
+
+
+# @bot.command()
+# async def pokemon(ctx, count=6):
+#     if not ctx.message.guild:
+#         output = generate_pokemon(count)
+
+#         await ctx.send(f"{output}")
+
+
+
+
+# @bot.command()
+# async def blackjack(ctx: commands.context, bet=0):
+    # valid = False
+    # if not ctx.message.guild:
+    #     valid = True
+
+    # if ctx.message.guild:
+    #     user = ctx.message.author
+    #     guildname = str(ctx.guild.id)
+    #     guildstring = guildname + ".json"
+    #     with open(guildstring, 'r') as openfile:
+    #         database = json.load(openfile)
+
+    #     for x in database["serverroles"]:
+    #         if database["serverroles"][x] >= 1:
+    #             myrole = discord.utils.get(ctx.guild.roles, name=x)
+    #             if myrole in ctx.message.author.roles:
+    #                 valid = True
+
+    #     if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(ctx.message.author.id) == "215277233638604800":
+    #         valid = True
+
+    # if valid == False:
+    #     print(f"User cant use this command")
+
+    # if valid == True:
+    #     bet = int(bet)
+    #     userid = str(ctx.message.author.id)
+    #     coins = 0
+
+    #     if bet > 0:
+    #         with open("database.json", 'r') as openfile:
+    #             database = json.load(openfile)
+
+    #         if userid in database:
+    #             first = database[userid]
+    #             coins = first[0]
+
+    #         if userid not in database:
+    #             await ctx.send("You must be registered to bet coins.")
+
+    #     win = 0
+    #     randomdieA = random.randint(1,6)
+    #     randomdieB = random.randint(1,6)
+    #     total = randomdieA + randomdieB
+
+    #     randomdieC = random.randint(1,6)
+    #     dealerscore = randomdieC
+    #     astring = str("")
+    #     while dealerscore <= 8:
+    #         dealerscore += random.randint(1,6)
+    #         astring += " + [?]"
+
+    #     await ctx.send(f"Blackjack Dice! (Target: 12)")
+    #     if coins >= bet > 0:
+    #         await ctx.send(f"You bet {bet} coins")
+    #     else:
+    #         bet = 0
+    #     await ctx.send("-----------------------------")
+    #     await ctx.send(f"Dealer: [{randomdieC}] + [?]{astring}")
+
+    #     if dealerscore == total == 12:
+    #         win = 3
+    #         await ctx.send(f"Dealer hand: {dealerscore}\n[{randomdieA}] + [{randomdieB}] = {total}")
+    #         await ctx.send("Tie")
+
+    #     if dealerscore == 12:
+    #         win = 1
+    #         await ctx.send(f"Dealer hand: {dealerscore}\n[{randomdieA}] + [{randomdieB}] = {total}")
+    #         await ctx.send("You lose")
+    #         if bet > 0:
+    #             coins -= bet
+
+    #     if total == 12 or dealerscore > 12:
+    #         win = 2
+    #         await ctx.send(f"Dealer hand: {dealerscore}\n[{randomdieA}] + [{randomdieB}] = {total}")
+    #         await ctx.send("You win")
+    #         if bet > 0:
+    #             coins += bet
+
+    #     if win == 0:
+    #         await ctx.send(f"[{randomdieA}] + [{randomdieB}] = {total}", view=BlackjackButtons(total, dealerscore, userid, bet))
+    #     else:
+    #         if bet > 0:
+    #             variable = database[userid]
+    #             variable[0] = coins
+    #             with open("database.json", "w") as outfile:
+    #                 json.dump(database, outfile)
+    #             await ctx.send(f"You now have {coins} coins")
+
+
+# class BlackjackButtons(discord.ui.View):
+#     def __init__(self, total, dealerscore, userid, bet):
+#         super().__init__()
+#         self.total=total
+#         self.dealerscore=dealerscore
+#         self.userid = userid
+#         self.bet = bet
+#         # timeout=None
+#         # self.stop()
+
+#     @discord.ui.button(label="Hit", style=discord.ButtonStyle.blurple)
+#     async def HitButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         oldtotal = self.total
+#         randomdie = random.randint(1,6)
+#         self.total += randomdie
+#         await interaction.response.edit_message(content="You: " + str(oldtotal) + " + [" + str(randomdie) + "] = " + str(self.total))
+
+#         if self.total > 12:
+#             win = 1
+#             await interaction.channel.send(f"Dealer hand: {self.dealerscore}")
+#             await interaction.channel.send("You lose")
+#             if self.bet > 0:
+#                 with open("database.json", 'r') as openfile:
+#                     database = json.load(openfile)
+#                 if self.userid in database:
+#                     first = database[self.userid]
+#                     coins = first[0]
+#                     coins -= self.bet
+#                     variable = database[self.userid]
+#                     variable[0] = coins
+#                     with open("database.json", "w") as outfile:
+#                         json.dump(database, outfile)
+#                     await interaction.channel.send(f"You now have {coins} coins")
+#             self.stop()
+
+#         if self.total == 12:
+#             win = 2
+#             await interaction.channel.send(f"Dealer hand: {self.dealerscore}")
+#             await interaction.channel.send("You win")
+#             if self.bet > 0:
+#                 with open("database.json", 'r') as openfile:
+#                     database = json.load(openfile)
+#                 if self.userid in database:
+#                     first = database[self.userid]
+#                     coins = first[0]
+#                     coins += self.bet
+#                     variable = database[self.userid]
+#                     variable[0] = coins
+#                     with open("database.json", "w") as outfile:
+#                         json.dump(database, outfile)
+#                     await interaction.channel.send(f"You now have {coins} coins")
+#             self.stop()
+
+
+#     @discord.ui.button(label="Stand", style=discord.ButtonStyle.green)
+#     async def StandButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+#         string = "Stand: total = " + str(self.total)
+#         await interaction.response.edit_message(content=string)
+
+#         if self.total > 12 or self.total < self.dealerscore:
+#             win = 1
+#             await interaction.channel.send(f"Dealer hand: {self.dealerscore}")
+#             await interaction.channel.send(f"Your hand: {self.total}")
+#             await interaction.channel.send("You lose")
+#             if self.bet > 0:
+#                 with open("database.json", 'r') as openfile:
+#                     database = json.load(openfile)
+#                 if self.userid in database:
+#                     first = database[self.userid]
+#                     coins = first[0]
+#                     coins -= self.bet
+#                     variable = database[self.userid]
+#                     variable[0] = coins
+#                     with open("database.json", "w") as outfile:
+#                         json.dump(database, outfile)
+#                     await interaction.channel.send(f"You now have {coins} coins")
+
+#         if self.total > self.dealerscore:
+#             win = 2
+#             await interaction.channel.send(f"Dealer hand: {self.dealerscore}")
+#             await interaction.channel.send(f"Your hand: {self.total}")
+#             await interaction.channel.send("You win")
+#             if self.bet > 0:
+#                 with open("database.json", 'r') as openfile:
+#                     database = json.load(openfile)
+#                 if self.userid in database:
+#                     first = database[self.userid]
+#                     coins = first[0]
+#                     coins += self.bet
+#                     variable = database[self.userid]
+#                     variable[0] = coins
+#                     with open("database.json", "w") as outfile:
+#                         json.dump(database, outfile)
+#                     await interaction.channel.send(f"You now have {coins} coins")
+
+#         if self.total == self.dealerscore:
+#             win = 3
+#             await interaction.channel.send(f"Dealer hand: {self.dealerscore}")
+#             await interaction.channel.send(f"Your hand: {self.total}")
+#             await interaction.channel.send("Tie")
+
+#         self.stop()
+
+
+# # keys = "Type", "HP", "Strongest Attack", "Biggest Attack Energy Cost", "Retreat Cost", "Stage", "release set"
+
+# pokemondb = {
+#     "bulbasaur": ["Grass", 70, 40, 2, 1, "Basic", "Genetic Apex"],
+#     "ivysaur": ["Grass", 90, 60, 3, 2, "Stage 1", "Genetic Apex"],
+#     "venusaur": ["Grass", 160, 80, 4, 3, "Stage 2", "Genetic Apex"],
+#     "caterpie": ["Grass", 50, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "metapod": ["Grass", 80, 30, 2, 2, "Stage 1", "Genetic Apex"],
+#     "butterfree": ["Grass", 120, 60, 3, 1, "Stage 2", "Genetic Apex"],
+#     "weedle": ["Grass", 50, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "kakuna": ["Grass", 80, 30, 1, 2, "Stage 1", "Genetic Apex"],
+#     "beedrill": ["Grass", 120, 70, 1, 1, "Stage 2", "Genetic Apex"],
+#     "oddish": ["Grass", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "gloom": ["Grass", 80, 40, 2, 2, "Stage 1", "Genetic Apex"],
+#     "vileplume": ["Grass", 140, 80, 3, 3, "Stage 2", "Genetic Apex"],
+#     "paras": ["Grass", 70, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "parasect": ["Grass", 120, 80, 3, 2, "Stage 1", "Genetic Apex"],
+#     "venonat": ["Grass", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "venomoth": ["Grass", 80, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "bellsprout": ["Grass", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "weepinbell": ["Grass", 90, 40, 2, 2, "Stage 1", "Genetic Apex"],
+#     "victreebel": ["Grass", 140, 60, 2, 2, "Stage 2", "Genetic Apex"],
+#     "exeggcute": ["Grass", 50, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "exeggutor": ["Grass", 130, 30, 1, 3, "Stage 1", "Genetic Apex"],
+#     "tangela": ["Grass", 80, 40, 2, 2, "Basic", "Genetic Apex"],
+#     "scyther": ["Grass", 70, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "pinsir": ["Grass", 90, 50, 2, 2, "Basic", "Genetic Apex"],
+#     "cottonee": ["Grass", 50, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "whimsicott": ["Grass", 80, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "petilil": ["Grass", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "lilligant": ["Grass", 100, 50, 2, 1, "Stage 1", "Genetic Apex"],
+#     "skiddo": ["Grass", 70, 40, 1, 1, "Basic", "Genetic Apex"],
+#     "gogoat": ["Grass", 120, 70, 3, 2, "Stage 1", "Genetic Apex"],
+#     "charmander": ["Fire", 60, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "charmeleon": ["Fire", 90, 60, 3, 2, "Stage 1", "Genetic Apex"],
+#     "charizard": ["Fire", 150, 150, 4, 2, "Stage 2", "Genetic Apex"],
+#     "vulpix": ["Fire", 50, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "ninetales": ["Fire", 90, 90, 2, 1, "Stage 1", "Genetic Apex"],
+#     "growlithe": ["Fire", 70, 20, 2, 1, "Basic", "Genetic Apex"],
+#     "arcanine": ["Fire", 130, 100, 3, 2, "Stage 1", "Genetic Apex"],
+#     "ponyta": ["Fire", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "rapidash": ["Fire", 100, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "magmar": ["Fire", 80, 50, 2, 2, "Basic", "Genetic Apex"],
+#     "flareon": ["Fire", 120, 110, 3, 2, "Stage 1", "Genetic Apex"],
+#     "moltres": ["Fire", 100, 130, 3, 1, "Basic", "Genetic Apex"],
+#     "heatmor": ["Fire", 80, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "salandit": ["Fire", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "salazzle": ["Fire", 90, 60, 2, 1, "Stage 1", "Genetic Apex"],
+#     "sizzlipede": ["Fire", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "centiscorch": ["Fire", 130, 130, 4, 3, "Stage 1", "Genetic Apex"],
+#     "squirtle": ["Water", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "wartortle": ["Water", 80, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "blastoise": ["Water", 150, 80, 3, 3, "Stage 2", "Genetic Apex"],
+#     "psyduck": ["Water", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "golduck": ["Water", 90, 70, 2, 1, "Stage 1", "Genetic Apex"],
+#     "poliwag": ["Water", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "poliwhirl": ["Water", 90, 40, 2, 2, "Stage 1", "Genetic Apex"],
+#     "poliwrath": ["Water", 150, 80, 3, 2, "Stage 2", "Genetic Apex"],
+#     "tentacool": ["Water", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "tentacruel": ["Water", 110, 50, 2, 2, "Stage 1", "Genetic Apex"],
+#     "seel": ["Water", 80, 30, 2, 2, "Basic", "Genetic Apex"],
+#     "dewgong": ["Water", 120, 90, 3, 3, "Stage 1", "Genetic Apex"],
+#     "shellder": ["Water", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "cloyster": ["Water", 120, 70, 3, 3, "Stage 1", "Genetic Apex"],
+#     "krabby": ["Water", 70, 40, 2, 2, "Basic", "Genetic Apex"],
+#     "kingler": ["Water", 120, 80, 3, 3, "Stage 1", "Genetic Apex"],
+#     "horsea": ["Water", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "seadra": ["Water", 70, 50, 3, 1, "Stage 1", "Genetic Apex"],
+#     "goldeen": ["Water", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "seaking": ["Water", 100, 80, 1, 1, "Stage 1", "Genetic Apex"],
+#     "staryu": ["Water", 50, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "starmie": ["Water", 90, 40, 1, 0, "Stage 1", "Genetic Apex"],
+#     "magikarp": ["Water", 30, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "gyarados": ["Water", 150, 100, 4, 4, "Stage 1", "Genetic Apex"],
+#     "lapras": ["Water", 100, 20, 1, 2, "Basic", "Genetic Apex"],
+#     "vaporeon": ["Water", 130, 60, 3, 2, "Stage 1", "Genetic Apex"],
+#     "omanyte": ["Water", 90, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "omastar": ["Water", 140, 70, 3, 2, "Stage 2", "Genetic Apex"],
+#     "articuno": ["Water", 100, 60, 3, 1, "Basic", "Genetic Apex"],
+#     "ducklett": ["Water", 50, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "swanna": ["Water", 90, 70, 3, 1, "Stage 1", "Genetic Apex"],
+#     "froakie": ["Water", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "frogadier": ["Water", 80, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "greninja": ["Water", 120, 60, 2, 1, "Stage 2", "Genetic Apex"],
+#     "pyukumuku": ["Water", 70, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "bruxish": ["Water", 90, 10, 2, 1, "Basic", "Genetic Apex"],
+#     "snom": ["Water", 50, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "frosmoth": ["Water", 90, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "pikachu": ["Electric", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "raichu": ["Electric", 100, 140, 3, 1, "Stage 1", "Genetic Apex"],
+#     "magnemite": ["Electric", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "magneton": ["Electric", 80, 60, 4, 2, "Stage 1", "Genetic Apex"],
+#     "voltorb": ["Electric", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "electrode": ["Electric", 80, 70, 2, 0, "Stage 1", "Genetic Apex"],
+#     "electabuzz": ["Electric", 70, 40, 2, 1, "Basic", "Genetic Apex"],
+#     "jolteon": ["Electric", 90, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "zapdos": ["Electric", 100, 100, 3, 1, "Basic", "Genetic Apex"],
+#     "blitzle": ["Electric", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "zebstrika": ["Electric", 90, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "tynamo": ["Electric", 30, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "eelektrik": ["Electric", 80, 40, 1, 2, "Stage 1", "Genetic Apex"],
+#     "eelektross": ["Electric", 140, 80, 3, 3, "Stage 2", "Genetic Apex"],
+#     "helioptile": ["Electric", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "heliolisk": ["Electric", 90, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "pincurchin": ["Electric", 70, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "clefairy": ["psychic", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "clefable": ["psychic", 100, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "abra": ["psychic", 60, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "kadabra": ["psychic", 80, 60, 3, 1, "Stage 1", "Genetic Apex"],
+#     "alakazam": ["psychic", 130, 60, 3, 2, "Stage 2", "Genetic Apex"],
+#     "slowpoke": ["psychic", 70, 30, 2, 2, "Basic", "Genetic Apex"],
+#     "slowbro": ["psychic", 130, 80, 3, 3, "Stage 1", "Genetic Apex"],
+#     "gastly": ["psychic", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "haunter": ["psychic", 80, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "gengar": ["psychic", 130, 50, 1, 2, "Stage 2", "Genetic Apex"],
+#     "drowzee": ["psychic", 70, 30, 2, 2, "Basic", "Genetic Apex"],
+#     "hypno": ["psychic", 100, 50, 3, 2, "Stage 1", "Genetic Apex"],
+#     "mr. mime": ["psychic", 80, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "jynx": ["psychic", 80, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "mewtwo": ["psychic", 120, 120, 4, 2, "Basic", "Genetic Apex"],
+#     "ralts": ["psychic", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "kirlia": ["psychic", 80, 30, 2, 1, "Stage 1", "Genetic Apex"],
+#     "gardevoir": ["psychic", 110, 60, 3, 2, "Stage 2", "Genetic Apex"],
+#     "woobat": ["psychic", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "swoobat": ["psychic", 90, 60, 2, 1, "Stage 1", "Genetic Apex"],
+#     "golett": ["psychic", 90, 50, 3, 3, "Basic", "Genetic Apex"],
+#     "golurk": ["psychic", 140, 100, 4, 4, "Stage 1", "Genetic Apex"],
+#     "sandshrew": ["Fighting", 70, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "sandslash": ["Fighting", 100, 70, 2, 2, "Stage 1", "Genetic Apex"],
+#     "diglett": ["Fighting", 50, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "dugtrio": ["Fighting", 70, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "mankey": ["Fighting", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "primeape": ["Fighting", 90, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "machop": ["Fighting", 70, 20, 1, 2, "Basic", "Genetic Apex"],
+#     "machoke": ["Fighting", 100, 50, 2, 2, "Stage 1", "Genetic Apex"],
+#     "machamp": ["Fighting", 150, 100, 3, 3, "Stage 2", "Genetic Apex"],
+#     "geodude": ["Fighting", 70, 20, 1, 2, "Basic", "Genetic Apex"],
+#     "graveler": ["Fighting", 100, 70, 3, 3, "Stage 1", "Genetic Apex"],
+#     "golem": ["Fighting", 160, 150, 4, 4, "Stage 2", "Genetic Apex"],
+#     "onix": ["Fighting", 110, 70, 3, 4, "Basic", "Genetic Apex"],
+#     "cubone": ["Fighting", 60, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "marowak": ["Fighting", 100, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "hitmonlee": ["Fighting", 80, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "hitmonchan": ["Fighting", 80, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "rhyhorn": ["Fighting", 80, 60, 3, 3, "Basic", "Genetic Apex"],
+#     "rhydon": ["Fighting", 120, 100, 4, 4, "Stage 1", "Genetic Apex"],
+#     "kabuto": ["Fighting", 90, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "kabutops": ["Fighting", 140, 50, 1, 1, "Stage 2", "Genetic Apex"],
+#     "mienfoo": ["Fighting", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "mienshao": ["Fighting", 80, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "clobbopus": ["Fighting", 80, 30, 2, 2, "Basic", "Genetic Apex"],
+#     "grapploct": ["Fighting", 130, 70, 3, 3, "Stage 1", "Genetic Apex"],
+#     "ekans": ["Dark", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "arbok": ["Dark", 100, 60, 2, 2, "Stage 1", "Genetic Apex"],
+#     "Nidoran♀": ["Dark", 60, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "nidorina": ["Dark", 80, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "nidoqueen": ["Dark", 140, 80, 3, 2, "Stage 2", "Genetic Apex"],
+#     "Nidoran♂": ["Dark", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "nidorino": ["Dark", 90, 40, 2, 2, "Stage 1", "Genetic Apex"],
+#     "nidoking": ["Dark", 150, 90, 3, 3, "Stage 2", "Genetic Apex"],
+#     "zubat": ["Dark", 50, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "golbat": ["Dark", 70, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "grimer": ["Dark", 70, 10, 1, 3, "Basic", "Genetic Apex"],
+#     "muk": ["Dark", 130, 70, 3, 3, "Stage 1", "Genetic Apex"],
+#     "koffing": ["Dark", 70, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "weezing": ["Dark", 110, 30, 1, 3, "Stage 1", "Genetic Apex"],
+#     "mawile": ["Steel", 70, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "pawniard": ["Steel", 50, 30, 1, 1, "Basic", "Genetic Apex"],
+#     "bisharp": ["Steel", 90, 70, 2, 1, "Stage 1", "Genetic Apex"],
+#     "meltan": ["Steel", 60, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "melmetal": ["Steel", 130, 120, 4, 3, "Stage 1", "Genetic Apex"],
+#     "dratini": ["Dragon", 70, 40, 2, 1, "Basic", "Genetic Apex"],
+#     "dragonair": ["Dragon", 100, 80, 3, 1, "Stage 1", "Genetic Apex"],
+#     "dragonite": ["Dragon", 160, 200, 4, 3, "Stage 2", "Genetic Apex"],
+#     "pidgey": ["Normal", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "pidgeotto": ["Normal", 80, 30, 1, 1, "Stage 1", "Genetic Apex"],
+#     "pidgeot": ["Normal", 130, 70, 2, 1, "Stage 2", "Genetic Apex"],
+#     "rattata": ["Normal", 40, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "raticate": ["Normal", 80, 40, 1, 1, "Stage 1", "Genetic Apex"],
+#     "spearow": ["Normal", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "fearow": ["Normal", 100, 50, 2, 1, "Stage 1", "Genetic Apex"],
+#     "jigglypuff": ["Normal", 60, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "wigglytuff": ["Normal", 100, 60, 2, 2, "Stage 1", "Genetic Apex"],
+#     "meowth": ["Normal", 60, 10, 1, 1, "Basic", "Genetic Apex"],
+#     "persian": ["Normal", 90, 40, 2, 1, "Stage 1", "Genetic Apex"],
+#     "farfetch'd": ["Normal", 60, 40, 1, 1, "Basic", "Genetic Apex"],
+#     "doduo": ["Normal", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "dodrio": ["Normal", 80, 40, 1, 0, "Stage 1", "Genetic Apex"],
+#     "lickitung": ["Normal", 90, 60, 3, 3, "Basic", "Genetic Apex"],
+#     "chansey": ["Normal", 120, 60, 3, 3, "Basic", "Genetic Apex"],
+#     "kangaskhan": ["Normal", 100, 30, 1, 3, "Basic", "Genetic Apex"],
+#     "tauros": ["Normal", 100, 50, 2, 2, "Basic", "Genetic Apex"],
+#     "ditto": ["Normal", 70, 0, 1, 1, "Basic", "Genetic Apex"],
+#     "eevee": ["Normal", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "porygon": ["Normal", 50, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "aerodactyl": ["Normal", 100, 0, 2, 1, "Stage 1", "Genetic Apex"],
+#     "snorlax": ["Normal", 150, 70, 4, 4, "Basic", "Genetic Apex"],
+#     "minccino": ["Normal", 60, 20, 1, 1, "Basic", "Genetic Apex"],
+#     "cinccino": ["Normal", 90, 30, 3, 1, "Stage 1", "Genetic Apex"],
+#     "wooloo": ["Normal", 70, 30, 2, 1, "Basic", "Genetic Apex"],
+#     "dubwool": ["Normal", 120, 80, 3, 2, "Stage 1", "Genetic Apex"]
+# }
+
+
+# class WordleModal(discord.ui.Modal, title="Wordle"):
+#     def __init__(self, fullstring):
+#         super().__init__(timeout=None)
+#         self.fullstring = fullstring
+
+#     word = discord.ui.TextInput(
+#         label='Word',
+#         placeholder='Your word here...',
+#     )
+
+#     async def on_submit(self, interaction: discord.Interaction):
+#         # await interaction.response.send_message(f'You submitted: {self.word.value}', ephemeral=True)
+#         await interaction.response.edit_message(view=None)
+#         return self.word.value
+
+
+# class WordleButton(discord.ui.View):
+    # def __init__(self, fullstring, answer):
+    #     super().__init__(timeout=None)
+    #     self.fullstring = fullstring
+    #     self.answer = answer
+
+    # @discord.ui.button(label="Guess", style=discord.ButtonStyle.green)
+    # async def WordleGuessButton(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     View = WordleModal(self.fullstring)
+    #     await interaction.response.send_modal(View)
+        
+    #     await View.wait()
+
+    #     if View.word.value:
+    #         # self.answer = "charmander" # Change this based on daily variable later
+    #         bigstring = ""
+    #         keys = ["Type", "HP", "Strongest Attack (base/printed damage)", "Biggest Attack Energy Cost", "Retreat Cost", "Stage", "Release Set"]
+
+    #         string = View.word.value
+    #         string = string.lower()
+
+    #         if string in pokemondb:
+    #             iteration = 0
+    #             correctvariable = 1
+    #             for x in range(0, len(pokemondb[self.answer])):
+    #                 if pokemondb[string][x] == pokemondb[self.answer][x]:
+    #                     bigstring += "🟩 ~ " + keys[iteration] + ": " + str(pokemondb[string][x]) + "\n"
+    #                     self.fullstring += "🟩"
+    #                 else:
+    #                     bigstring += "🟥 ~ " + keys[iteration] + ": " + str(pokemondb[string][x]) + "\n"
+    #                     self.fullstring += "🟥"
+    #                     correctvariable = 0
+    #                 iteration += 1
+    #             self.fullstring += "\n"
+    #             if correctvariable == 1:
+    #                 embed = discord.Embed(
+    #                     title=""
+    #                 )
+    #                 embed.add_field(name="", value=f"{self.fullstring}?pocketle {datetime.date.today()}")
+    #                 await interaction.channel.send(f"You got it! 🎉\nThe answer was ||{string}||!")
+    #                 await interaction.channel.send(embed=embed)
+    #                 # await interaction.channel.send(f'You got it! 🎉 The answer was ||{string}||\n--------------------------------\n{self.fullstring}?pocketle {datetime.date.today()}\n--------------------------------')
+    #             else:
+    #                 await interaction.channel.send(f'{string}\n{bigstring}', view=WordleButton(self.fullstring, self.answer))
+    #         else:
+    #             await interaction.channel.send(f'{string} is not a valid card name', view=WordleButton(self.fullstring, self.answer))
+    #         # print(self.fullstring)
+
+
+# @bot.command()
+# async def pocketle(ctx):
+#     fullstring = ""
+#     thisday = str(datetime.date.today())
+#     random.seed(thisday)
+#     answer = random.choice(list(pokemondb.keys()))
+#     if not ctx.message.guild:
+#         await ctx.send(f"Pocketle {datetime.date.today()} ~ *This game uses all non-EX Pokemon up to Genetic Apex ~ Database done by hand. There may be mistakes*", view=WordleButton(fullstring, answer))
+#     else:
+#         member = ctx.message.author
+#         channel = await member.create_dm()
+#         await channel.send(f"Pocketle {datetime.date.today()} ~ *This game uses all non-EX Pokemon up to Genetic Apex ~ Database done by hand. There may be mistakes*", view=WordleButton(fullstring, answer))
+
+
+# @bot.command()
+# async def randomptcgp(ctx, count=9):
+#     valid = True
+#     if ctx.message.guild:
+#         valid = False
+#         user = ctx.message.author
+#         guildname = str(ctx.guild.id)
+#         guildstring = guildname + ".json"
+#         with open(guildstring, 'r') as openfile:
+#             database = json.load(openfile)
+#         valid = False
+#         if user.guild_permissions.manage_guild == True or user.guild_permissions.administrator == True or str(ctx.message.author.id) == "215277233638604800":
+#             valid = True
+#         for x in database["serverroles"]:
+#             if database["serverroles"][x] >= 1:
+#                 myrole = discord.utils.get(ctx.guild.roles, name=x)
+#                 if myrole in ctx.message.author.roles:
+#                     valid = True
+
+#     if valid == True:
+#         if count > 20:
+#             count = 20
+
+#         typeA = ["Oddish", "Tangela", "Yanma", "Roselia", "Turtwig", "Kricketot", "Burmy", "Combee", "Magmar", "Slugma", "Chimchar", "Swinub", "Piplup", "Buisel", "Shellos", "Finneon", "Snover", "Magnemite", "Voltorb", "Electabuzz", "Shinx", "Togepi", "Misdreavus", "Ralts", "Duskull", "Drifloon", "Rhyhorn", "Gligar", "Nosepass", "Riolu", "Hippopotas", "Murkrow", "Sneasel", "Poochyena", "Stunky", "Skorupi", "Croagunk", "Bronzor", "Gible", "Lickitung", "Eevee", "Porygon", "Aipom", "Starly", "Bidoof", "Buneary", "Glameow", "Exeggcute", "Snivy", "Morelull", "Ponyta", "Larvesta", "Salandit", "Magikarp", "Chewtle", "Pikachu", "Joltik", "Elgyem", "Flabebe", "Swirlix", "Mankey", "Geodude", "Koffing", "Purrloin", "Venipede", "Pidgey", "Bulbasaur", "Caterpie", "Weedle", "Paras", "Venonat", "Bellsprout", "Cotonee", "Petilil", "Skiddo", "Charmander", "Vulpix", "Growlithe", "Ponyta", "Sizzlipede", "Sqirtle", "Psyduck", "Poliwag", "Tentacool", "Seel", "Shellder", "Krabby", "Horsea", "Goldeen", "Staryu", "Ducklett", "Froakie", "Snom", "Blitzle", "Tynamo", "Helioptile", "Clefairy", "Abra", "Slowpoke", "Gastly", "Drowzee", "Woobat", "Golett", "Sandshrew", "Diglett", "Machop", "Cubone", "Mienfoo", "Clobbopus", "Ekans", "Nidoran♀", "Nidoran♂", "Zubat", "Grimer", "Pawniard", "Meltan", "Dratini", "Rattata", "Spearow", "Jigglypuff", "Meowth", "Doduo", "Minccino", "Wooloo"]
+#         typeB = ["Bellossom", "Tangrowth", "Yanmega", "Roserade", "Torterra", "Kricketune", "Wormadam", "Vespiquen", "Carnivine", "Leafeon", "Mow Rotom", "Shaymin", "Magmortar", "Magcargo", "Heat Rotom", "Mamoswine", "Regice", "Empoleon", "Floatzel", "Gastrodon", "Lumineon", "Abomasnow", "Glaceon", "Wash Rotom", "Frost Rotom", "Manaphy", "Magnezone", "Electrode", "Electivire", "Luxray", "Rotom", "Togekiss", "Dusknoir", "Drifblim", "Uxie", "Mesprit", "Azelf", "Giratina", "Cresselia", "Rhyperior", "Gliscor", "Hitmontop", "Regirock", "Rampardos", "Lucario", "Hippowdon", "Honchkrow", "Mightyena", "Skuntank", "Spiritomb", "Drapion", "Toxicroak", "Darkrai", "Skarmory", "Registeel", "Bastiodon", "Bronzong", "Probopass", "Heatran", "Garchomp", "Porygon Z", "Ambipom", "Staraptor", "Bibarel", "Lopunny", "Purugly", "Chatot", "Fan Rotom", "Regigigas", "Exeggutor", "Serperior", "Shiinotic", "Dhelmise", "Rapidash", "Volcarona", "Salazzle", "Vaporeon", "Lumineon", "Drednaw", "Crawmorant", "Raichu", "Galvantula", "Dedenne", "Mew", "Sigilyph", "Beheeyem", "Florges", "Slurpuff", "Primeape", "Golem", "Marshadow", "Stonjourner", "Weezing", "Liepard", "Scolipede", "Druddigon", "Tauros", "Chatot", "Venusaur", "Butterfree", "Beedrill", "Vileploom", "Parasect", "Venomoth", "Victreebel", "Exeggutor", "Scyther", "Pinsir", "Whimsicott", "Lilligant", "Gogoat", "Charizard", "Ninetales", "Arcanine", "Rapidash", "Flareon", "Moltres", "Heatmor", "Salazzle", "Centiscorch", "Blastoise", "Golduck", "Poliwrath", "Dewgong", "Cloyster", "Kingler", "Seadra", "Seaking", "Starmie", "Gyarados", "Lapras", "Vaporeon", "Omastar", "Articuno", "Swanna", "Greninja", "Pyukumuku", "Bruxish", "Frosmoth", "Raichu", "Electrode", "Jolteon", "Zapdos", "Zebstrika", "Eelektross", "Heliolisk", "Pincurchin", "Clefable", "Alakazam", "Slowbro", "Gengar", "Hypno", "Mr. Mime", "Jynx", "Mewtwo", "Gardevoir", "Swoobat", "Golurk", "Sandslash", "Dugtrio", "Primeape", "Machamp", "Golem", "Onix", "Marowak", "Hitmonlee", "Hitmonchan", "Kabutops", "Mienshao", "Grapploct", "Arbok", "Nidoqueen", "Nidoking", "Golbat", "Muk", "Weezing", "Mawile", "Bisharp", "Melmetal", "Dragonite", "Pidgeott", "Raticate", "Fearow", "Wigglytuff", "Persian", "Farfetch'd", "Dodrio", "Lickitung", "Chansey", "Kangaskhan", "Tauros", "Ditto", "Aerodactyl", "Snorlax", "Cinccino", "Dubwool"]
+
+#         typeA = list(set(typeA))
+#         typeB = list(set(typeB))
+
+#         bigstring = "Rules:\nNo EX. All Trainers allowed"
+
+#         choosetype = random.randint(1, 4)
+#         if choosetype == 1:
+#             mylist = random.sample(typeA, count)
+#             bigstring = bigstring + "\nAll these Pokemon (NOT their evolution lines) are allowed:"
+#         else:
+#             mylist = random.sample(typeB, count)
+#             bigstring = bigstring + "\nAll these Pokemon (AND their evolution lines) are allowed:"
+        
+#         for x in mylist:
+#             bigstring = bigstring + "\n" + x
+
+#         await ctx.send(bigstring)
+
+
+# @bot.command()
+# async def pokemon(ctx, count=6):
+#     if not ctx.message.guild:
+#         output = generate_pokemon(count)
+
+#         await ctx.send(f"{output}")
+
+
+# @bot.command()
+# async def champ(ctx):
+
+#     valid = False
+#     if str(ctx.message.author.id) == "215277233638604800":
+#         valid = True
+
+#     if not ctx.message.guild:
+#         valid = True
+
+#     if ctx.message.guild:
+#         if ctx.guild.id == "969131568809521152":
+#             valid = True
+
+#     if valid == True:
+#         champlist = ["Aatrox", "Ahri", "Akali", "Akshan", "Alistar", "Ambessa", "Amumu", "Anivia", "Annie", "Aphelios", "Ashe", "Aurelion Sol", "Aurora", "Azir", "Bard", "Bel'Veth", "Blitzcrank", "Brand", "Braum", "Briar", "Caitlyn", "Cammile", "Cassiopeia", "Cho'Gath", "Corki", "Darius", "Diana", "Draven", "Dr. Mundo", "Ekko", "Elise", "Evelynn", "Ezreal", "Fiddlesticks", "Fiora", "Fizz", "Galio", "Gangplank", "Garen", "Gnar", "Gragas", "Graves", "Gwen", "Hecarim", "Heimerdinger", "Hwei", "Illaoi", "Irelia", "Ivern", "Janna", "Jarvan IV", "Jax", "Jayce", "Jhin", "Jinx", "Kaisa", "Kallista", "Karma", "Karthus", "Kassadin", "Katarina", "Kayle", "Kayn", "Kennen", "Kha'Zix", "Kindred", "Kled", "Kog'Maw", "K'Sante", "LeBlanc", "Lee Sin", "Leona", "Lillia", "Lissandra", "Lucian", "Lulu", "Lux", "Malphite", "Malzahar", "Maokai", "Master Yi", "Milio", "Miss Fortune", "Mordekaiser", "Morgana", "Naafiri", "Nami", "Nasus", "Nautilus", "Neeko", "Nidalee", "Nilah", "Nocturne", "Nunu & Willump", "Olaf", "Orianna", "Ornn", "Pantheon", "Poppy", "Pyke", "Qiyanna" "Quinn", "Rakan", "Rammus", "Rek'Sai", "Rell", "Renata Glasc", "Renekton", "Rengar", "Riven", "Rumble", "Ryze", "Samira", "Sejuani", "Senna", "Seraphine", "Sett", "Shaco", "Shen", "Shyvana", "Singed", "Sion", "Sivir", "Skarner", "Smolder", "Sona", "Soraka", "Swain", "Sylas", "Syndra", "Tahm Kench", "Taliyah", "Talon", "Taric", "Teemo", "Thresh", "Tristana", "Trundle", "Tryndamere", "Twisted Fate", "Twitch", "Udyr", "Urgot", "Varus", "Vayne", "Veigar", "Vel'Koz", "Vex", "Vi", "Viego", "Viktor", "Vladimir", "Volibear", "Warwick", "Wukong", "Xayah", "Xerath", "Xin Zhao" "Yasuo", "Yone", "Yorick", "Yuumi", "Zac", "Zed", "Zeri", "Ziggs", "Zilean", "Zoe", "Zyra"]
+#         choice = random.choice(champlist)
+#         await ctx.send(choice)
+
+
+# @client.tree.command(name="entitlementtest", description="testcommand", guild=guildid) # test command do not publish #
+# async def entitlementtest(interaction: discord.Interaction):
+#     if interaction.user.id == 215277233638604800:
+#         valid = True
+
+#     botid = client.user.id
+#     userid = interaction.user.id
+
+#     if valid == True:
+#         async for entitlement in client.entitlements():
+#             print(entitlement)
+
+#         # async for x in client.entitlements(user=interaction.user):
+#         #     if x.sku_id == 1361516425172357320:
+#         #         print("match")
+            
+#             # print(x)
+
+#             # if x.user_id == userid and x.sku_id == 1361516425172357320:
+#             #     print("yes")
+            
+#         #     print(x)
+#         # try:
+#         #     print(interaction.entitlements)
+#         #     print(interaction.entitlement_sku_ids)
+#         # except:
+#         #     print("error 2")
 
 client.run(BOT_TOKEN)
+# bot.run(BOT_TOKEN)
